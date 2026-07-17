@@ -1,0 +1,9 @@
+node_modules/
+.env
+*.log
+dist/
+build/
+
+# Test files
+test_output*.txt
+test_script*.js

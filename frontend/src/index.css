@@ -1,0 +1,24 @@
+@import "tailwindcss";
+
+@theme {
+  --color-primary: #141414;
+  --color-secondary: #FF3366;
+  --color-accent: #00E676;
+  --color-background: #F5F5F5;
+}
+
+body {
+  @apply bg-background text-primary font-sans antialiased;
+}
+
+.auth-form-container {
+  @apply w-full max-w-md mx-auto bg-white p-8 rounded-xl shadow-lg mt-20;
+}
+
+.input-field {
+  @apply w-full border border-gray-300 rounded-lg p-3 my-2 focus:outline-none focus:ring-2 focus:ring-secondary;
+}
+
+.btn-primary {
+  @apply w-full bg-secondary text-white font-bold py-3 rounded-lg mt-4 hover:opacity-90 transition shadow-md;
+}
