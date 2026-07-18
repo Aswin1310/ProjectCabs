@@ -17,14 +17,44 @@ const DriverProfile = () => {
   useEffect(() => {
     const fetchAll = async () => {
       try {
-        const driverRes = await api.get('/driver/me');
-        setDriverData(driverRes.data);
-        setProfile(driverRes.data.userId); // set profile from populated userId
+        const [driverRes, ridesRes] = await Promise.all([
+          api.get('/driver/me').catch(() => null),
+          api.get('/rides').catch(() => ({ data: [] }))
+        ]);
+        
+        if (driverRes?.data) {
+          setDriverData(driverRes.data);
+          setProfile(driverRes.data.userId); // set profile from populated userId
+        }
+        
+        if (ridesRes?.data) {
+          setRecentRides(ridesRes.data);
+          // Calculate stats locally
+          const completed = ridesRes.data.filter(r => r.rideStatus === 'completed' || r.paymentStatus === 'paid');
+          const now = new Date();
+          const todayStr = now.toISOString().split('T')[0];
+          const monthStr = todayStr.substring(0, 7);
 
-        // Fetch stats via admin-stats endpoint using the driverId
-        const statsRes = await api.get(`/admin/drivers/${driverRes.data._id}/stats`);
-        setStats(statsRes.data.stats);
-        setRecentRides(statsRes.data.recentRides || []);
+          let todayTrips = 0, todayEarn = 0;
+          let monthTrips = 0, monthEarn = 0;
+          let allTrips = 0, allEarn = 0;
+
+          completed.forEach(r => {
+              const rDateStr = r.createdAt.substring(0, 10);
+              const rMonthStr = r.createdAt.substring(0, 7);
+              const fare = r.fare || 0;
+              allTrips++; allEarn += fare;
+
+              if (rDateStr === todayStr) { todayTrips++; todayEarn += fare; }
+              if (rMonthStr === monthStr) { monthTrips++; monthEarn += fare; }
+          });
+
+          setStats({
+              today: { trips: todayTrips, earnings: todayEarn },
+              month: { trips: monthTrips, earnings: monthEarn },
+              allTime: { trips: allTrips, earnings: allEarn }
+          });
+        }
       } catch (err) {
         console.error(err);
       } finally {
@@ -105,7 +135,7 @@ const DriverProfile = () => {
           {[
             { id: 'overview', label: 'Overview' },
             { id: 'vehicle', label: 'Vehicle & License' },
-            { id: 'rides', label: `Recent Rides (${recentRides.length})` },
+            { id: 'history', label: `Earnings & History` },
           ].map(t => (
             <button
               key={t.id}
@@ -200,7 +230,6 @@ const DriverProfile = () => {
                     { icon: '🚕', label: 'Vehicle Class', val: driverData?.vehicleType },
                     { icon: '🔢', label: 'Registration Number', val: driverData?.vehicleNumber },
                     { icon: '📋', label: 'License Number', val: driverData?.licenseNumber },
-                    { icon: '📍', label: 'Last Known Location', val: driverData?.currentLocation?.coordinates ? `${driverData.currentLocation.coordinates[1].toFixed(4)}°N, ${driverData.currentLocation.coordinates[0].toFixed(4)}°E` : 'Not updated' },
                   ].map(f => (
                     <div key={f.label} className="flex items-start gap-3">
                       <span className="bg-stone-50 border border-stone-100 rounded-lg p-1.5 text-base">{f.icon}</span>
@@ -236,30 +265,58 @@ const DriverProfile = () => {
           </div>
         )}
 
-        {/* RIDES TAB */}
-        {activeTab === 'rides' && (
-          <div className="pb-10 space-y-3">
-            {loading ? (
-              <div className="space-y-3">{[...Array(5)].map((_,i)=><div key={i} className="h-20 bg-stone-100 animate-pulse rounded-2xl"/>)}</div>
-            ) : recentRides.length === 0 ? (
-              <div className="text-center py-16 text-stone-400">
-                <div className="text-6xl mb-4">🚕</div>
-                <p className="font-bold text-lg">No rides completed yet</p>
-                <p className="text-sm mt-1">Go online from your dashboard to start accepting rides.</p>
-              </div>
-            ) : recentRides.map((ride, i) => (
-              <div key={ride._id || i} className="bg-white rounded-2xl border border-stone-100 shadow-sm p-5 flex items-center gap-4">
-                <div className="w-10 h-10 rounded-xl bg-stone-100 flex items-center justify-center text-lg flex-shrink-0">✅</div>
-                <div className="flex-1 min-w-0">
-                  <p className="font-bold text-stone-800 text-sm truncate">{ride.pickup} → {ride.destination}</p>
-                  <p className="text-xs text-stone-400 mt-0.5">{ride.cabType} · {formatDate(ride.createdAt)}</p>
+        {/* EARNINGS & HISTORY TAB */}
+        {activeTab === 'history' && (
+          <div className="pb-10">
+            <div className="bg-white rounded-3xl shadow-sm border border-stone-100 overflow-hidden">
+                <div className="p-6 border-b border-stone-100 bg-stone-50">
+                    <h2 className="text-xl font-bold">Your Managed Rides</h2>
                 </div>
-                <div className="text-right flex-shrink-0">
-                  <p className="font-extrabold text-emerald-600">+₹{ride.fare}</p>
-                  <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${statusColors[ride.rideStatus]}`}>{ride.rideStatus}</span>
+                <div className="overflow-x-auto">
+                    <table className="min-w-full divide-y divide-stone-100">
+                        <thead className="bg-white">
+                            <tr>
+                                {['Date', 'Route', 'Passenger', 'Fare', 'Status'].map(h => (
+                                    <th key={h} className="px-6 py-4 text-left text-xs font-bold text-stone-500 uppercase tracking-wider">{h}</th>
+                                ))}
+                            </tr>
+                        </thead>
+                        <tbody className="bg-white divide-y divide-stone-100">
+                            {loading ? (
+                                <tr>
+                                    <td colSpan="5" className="px-6 py-10 text-center text-stone-400">Loading...</td>
+                                </tr>
+                            ) : recentRides.length > 0 ? recentRides.map((ride, i) => (
+                                <tr key={ride._id || i} className="hover:bg-stone-50 transition cursor-pointer" onClick={() => navigate(`/ride/${ride._id}`)}>
+                                    <td className="px-6 py-4 whitespace-nowrap text-sm text-stone-600 font-medium">
+                                        {formatDate(ride.createdAt)}
+                                    </td>
+                                    <td className="px-6 py-4 text-sm max-w-[200px]">
+                                        <div className="font-bold text-stone-800 truncate">{ride.pickup} → {ride.destination}</div>
+                                    </td>
+                                    <td className="px-6 py-4 whitespace-nowrap text-sm text-stone-600">
+                                        {ride.passengerId?.name || 'User'}
+                                    </td>
+                                    <td className="px-6 py-4 whitespace-nowrap text-sm font-bold text-green-600">
+                                        ₹{ride.fare}
+                                    </td>
+                                    <td className="px-6 py-4 whitespace-nowrap">
+                                        <span className={`px-3 py-1 inline-flex text-xs leading-5 font-bold rounded-full ${statusColors[ride.rideStatus]}`}>
+                                            {ride.rideStatus}
+                                        </span>
+                                    </td>
+                                </tr>
+                            )) : (
+                                <tr>
+                                    <td colSpan="5" className="px-6 py-10 text-center text-stone-400">
+                                        No rides found.
+                                    </td>
+                                </tr>
+                            )}
+                        </tbody>
+                    </table>
                 </div>
-              </div>
-            ))}
+            </div>
           </div>
         )}
       </div>

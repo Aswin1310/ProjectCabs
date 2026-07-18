@@ -13,9 +13,11 @@
     "@tailwindcss/postcss": "^4.3.3",
     "axios": "^1.18.1",
     "js-cookie": "^3.0.8",
+    "leaflet": "^1.9.4",
     "react": "^19.2.7",
     "react-dom": "^19.2.7",
     "react-hook-form": "^7.81.0",
+    "react-leaflet": "^5.0.0",
     "react-router-dom": "^7.18.1",
     "socket.io-client": "^4.8.3"
   },

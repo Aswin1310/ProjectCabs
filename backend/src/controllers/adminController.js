@@ -2,6 +2,8 @@ import { User } from '../models/User.js';
 import { Driver } from '../models/Driver.js';
 import { Ride } from '../models/Ride.js';
 import { Payment } from '../models/Payment.js';
+import { activePassengers, activeDrivers, getIO } from '../sockets/index.js';
+import { cacheRideState } from '../redis/index.js';
 
 // @desc    Get dashboard stats
 // @route   GET /api/admin/dashboard
@@ -136,6 +138,67 @@ export const deleteRide = async (req, res) => {
     
     await ride.deleteOne();
     res.json({ message: 'Ride deleted successfully' });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ message: 'Server Error' });
+  }
+};
+
+// @desc    Assign a driver to a ride
+// @route   PUT /api/admin/rides/:id/assign
+// @access  Private (Admin)
+export const assignRideToDriver = async (req, res) => {
+  try {
+    const { driverId } = req.body;
+    const rideId = req.params.id;
+
+    const ride = await Ride.findById(rideId);
+    if (!ride) return res.status(404).json({ message: 'Ride not found' });
+    if (ride.rideStatus !== 'pending') return res.status(400).json({ message: 'Ride is no longer pending' });
+    
+    const driver = await Driver.findById(driverId).populate('userId');
+    if (!driver) return res.status(404).json({ message: 'Driver not found' });
+
+    ride.driverId = driver._id;
+    ride.rideStatus = 'accepted';
+    await ride.save();
+
+    // Cache in Redis
+    try {
+      await cacheRideState(ride._id.toString(), {
+        rideId: ride._id,
+        rideStatus: 'accepted',
+        passengerId: ride.passengerId.toString(),
+        driverUserId: driver.userId._id.toString(),
+        driverName: driver.userId.name
+      });
+    } catch (_) {}
+
+    // Emit sockets
+    try {
+      const io = getIO();
+      
+      const passengerSocketId = activePassengers.get(ride.passengerId.toString());
+      if (passengerSocketId) {
+         io.to(passengerSocketId).emit('rideAccepted', {
+           rideId: ride._id,
+           driverId: driver.userId._id.toString(),
+           driverName: driver.userId.name,
+           message: `Admin assigned ${driver.userId.name} to your ride!`,
+         });
+      }
+      
+      const driverSocketId = activeDrivers.get(driver.userId._id.toString());
+      if (driverSocketId) {
+          io.to(driverSocketId).emit('rideAssigned', { message: 'Admin assigned a special ride to you!', rideId: ride._id });
+      }
+
+      io.emit('adminRideUpdate', { event: 'ride_accepted', rideId: ride._id, driverName: driver.userId.name });
+    } catch (socketErr) {
+      console.error('Socket emit failed in assignRideToDriver:', socketErr.message);
+    }
+
+    res.json(ride);
   } catch (error) {
     console.error(error);
     res.status(500).json({ message: 'Server Error' });

@@ -1,8 +1,9 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useAuth } from '../context/AuthContext';
 import api from '../services/api';
 import { io } from 'socket.io-client';
 import { useNavigate } from 'react-router-dom';
+import LeafletMap from '../components/LeafletMap';
 
 const PassengerDashboard = () => {
     const { user } = useAuth();
@@ -13,13 +14,21 @@ const PassengerDashboard = () => {
     const [bookingPhase, setBookingPhase] = useState('search'); // search, selecting, requesting
     const [pickup, setPickup] = useState('');
     const [destination, setDestination] = useState('');
-    const [locations, setLocations] = useState([]);
+    const [pickupPos, setPickupPos] = useState(null);
+    const [destPos, setDestPos] = useState(null);
+    const [activeSelection, setActiveSelection] = useState('pickup'); // 'pickup' or 'destination'
+    const [suggestions, setSuggestions] = useState([]);
+    const autocompleteTimeout = useRef(null);
     const [cabType, setCabType] = useState('Mini');
     const [fareEstimate, setFareEstimate] = useState(0);
+    const [myLocation, setMyLocation] = useState(null);
 
     // Rentals Package selector state
     const [rentalPackage, setRentalPackage] = useState('1 Hour (10 km) - ₹250');
     const [showOutstationTooltip, setShowOutstationTooltip] = useState(false);
+
+    // OSRM route info from the map
+    const [routeInfo, setRouteInfo] = useState(null); // { distanceM, durationS }
 
     const [mainTab, setMainTab] = useState('booking');
     const [myRides, setMyRides] = useState([]);
@@ -33,16 +42,97 @@ const PassengerDashboard = () => {
     ];
 
     useEffect(() => {
-        api.get('/locations').then(res => {
-            setLocations(res.data);
-            if (res.data.length > 0) {
-                setPickup(res.data[0].name);
-                setDestination(res.data[Math.min(1, res.data.length - 1)].name);
-            }
-        }).catch(err => console.error("Failed to load locations", err));
-
         api.get('/rides').then(res => setMyRides(res.data)).catch(err => console.error(err));
+
+        if (navigator.geolocation) {
+            const watchId = navigator.geolocation.watchPosition(
+                (pos) => {
+                    const { longitude, latitude } = pos.coords;
+                    if (isFinite(latitude) && isFinite(longitude)) {
+                        setMyLocation({ lng: longitude, lat: latitude });
+                    }
+                },
+                (err) => console.warn('Geoloc error:', err),
+                { enableHighAccuracy: true, maximumAge: 10000, timeout: 5000 }
+            );
+            return () => navigator.geolocation.clearWatch(watchId);
+        }
     }, []);
+
+    const handleInputChange = (text, type) => {
+        if (type === 'pickup') {
+            setPickup(text);
+            setActiveSelection('pickup');
+        } else {
+            setDestination(text);
+            setActiveSelection('destination');
+        }
+
+        if (autocompleteTimeout.current) clearTimeout(autocompleteTimeout.current);
+        if (text.length < 3) {
+            setSuggestions([]);
+            return;
+        }
+
+        autocompleteTimeout.current = setTimeout(async () => {
+            try {
+                const res = await fetch(`https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(text)}&format=json&limit=5`);
+                const data = await res.json();
+                setSuggestions(data);
+            } catch (err) {}
+        }, 800);
+    };
+
+    const selectSuggestion = (item) => {
+        const coords = [parseFloat(item.lon), parseFloat(item.lat)];
+        const addr = item.display_name.split(',')[0];
+        if (activeSelection === 'pickup') {
+            setPickupPos(coords);
+            setPickup(addr);
+            if (activeTab !== 'rentals') setActiveSelection('destination');
+        } else {
+            setDestPos(coords);
+            setDestination(addr);
+            setActiveSelection('pickup');
+        }
+        setSuggestions([]);
+    };
+
+    const handleMapClick = async ([lng, lat]) => {
+        if (bookingPhase !== 'search') return;
+        
+        try {
+            const res = await fetch(`https://nominatim.openstreetmap.org/reverse?lat=${lat}&lon=${lng}&format=json`);
+            const data = await res.json();
+            const address = data.display_name?.split(',')[0] || `${lat.toFixed(4)}, ${lng.toFixed(4)}`;
+            
+            if (activeSelection === 'pickup') {
+                setPickupPos([lng, lat]);
+                setPickup(address);
+                if (activeTab !== 'rentals') setActiveSelection('destination');
+            } else if (activeTab !== 'rentals') {
+                setDestPos([lng, lat]);
+                setDestination(address);
+                setActiveSelection('pickup');
+            }
+        } catch (err) {
+            console.error('Geocoding error:', err);
+            // Fallback if geocoding fails
+            const fallbackAddr = `${lat.toFixed(4)}, ${lng.toFixed(4)}`;
+            if (activeSelection === 'pickup') {
+                setPickupPos([lng, lat]);
+                setPickup(fallbackAddr);
+                if (activeTab !== 'rentals') setActiveSelection('destination');
+            } else if (activeTab !== 'rentals') {
+                setDestPos([lng, lat]);
+                setDestination(fallbackAddr);
+                setActiveSelection('pickup');
+            }
+        }
+    };
+
+    // Reset route info whenever pickup / destination changes
+    useEffect(() => { setRouteInfo(null); }, [pickup, destination]);
 
     const calculateFare = (e) => {
         e.preventDefault();
@@ -52,7 +142,8 @@ const PassengerDashboard = () => {
             const selectedPkg = rentalPackages.find(p => p.label === rentalPackage);
             calculatedFare = selectedPkg ? selectedPkg.price : 250;
         } else {
-            const mockDistance = Math.floor(Math.random() * 20) + 2; 
+            // Use OSRM real distance (metres → km), fall back to 10 km if not yet loaded
+            const km = routeInfo ? routeInfo.distanceM / 1000 : 10;
             const baseFares = { 
                 '4 Seater': 12, '5 Seater': 14, '6 Seater': 18, '7 Seater': 22, 
                 'Mini': 10, 'Sedan': 15, 'SUV': 25, 'Auto': 8 
@@ -60,7 +151,7 @@ const PassengerDashboard = () => {
             let rate = baseFares[cabType] || 10;
             // Outstation rides cost 1.5x standard rates
             if (activeTab === 'outstation') rate = Math.round(rate * 1.5);
-            calculatedFare = mockDistance * rate;
+            calculatedFare = Math.round(km * rate);
         }
         
         setFareEstimate(calculatedFare);
@@ -70,24 +161,26 @@ const PassengerDashboard = () => {
     const bookRide = async () => {
         setBookingPhase('requesting');
         
-        const pickupLoc = locations.find(l => l.name === pickup);
-        const destLoc = locations.find(l => l.name === destination);
+        if (!pickupPos || (activeTab !== 'rentals' && !destPos)) {
+            alert('Please select pickup and destination locations on the map.');
+            setBookingPhase('search');
+            return;
+        }
 
         const finalDestination = activeTab === 'rentals' ? `Rental: ${rentalPackage}` : destination;
-        const finalDestCoords = activeTab === 'rentals' 
-            ? (pickupLoc ? pickupLoc.coordinates : [76.9558, 11.0168])
-            : (destLoc ? destLoc.coordinates : [76.9658, 11.0268]);
+        const finalDestCoords = activeTab === 'rentals' ? pickupPos : destPos;
 
         try {
              const response = await api.post('/rides', {
                  pickup,
                  destination: finalDestination,
-                 pickupCoordinates: pickupLoc ? pickupLoc.coordinates : [76.9558, 11.0168],
+                 pickupCoordinates: pickupPos,
                  destinationCoordinates: finalDestCoords,
-                 distance: activeTab === 'rentals' ? 0 : fareEstimate / 10,
-                 duration: activeTab === 'rentals' ? 60 : 15, 
+                 distance: routeInfo ? parseFloat((routeInfo.distanceM / 1000).toFixed(2)) : (activeTab === 'rentals' ? 0 : 10),
+                 duration: routeInfo ? Math.ceil(routeInfo.durationS / 60) : (activeTab === 'rentals' ? 60 : 15),
                  fare: fareEstimate,
-                 cabType
+                 cabType,
+                 rideType: activeTab
              });
 
              // If backend says no driver found, show error instantly — no socket needed
@@ -194,17 +287,26 @@ const PassengerDashboard = () => {
                             {bookingPhase === 'search' && (
                                 <form onSubmit={calculateFare} className="space-y-6">
                                     <div className="space-y-4">
-                                        <div className="relative">
+                                        <div className={`relative transition ${activeSelection === 'pickup' ? 'ring-2 ring-black rounded-xl' : ''}`}>
                                             <span className="absolute inset-y-0 left-0 pl-4 flex items-center text-[#EAB308]">📍</span>
-                                            <select
-                                                className="w-full p-4 pl-12 border border-gray-200 rounded-xl bg-gray-50 font-semibold focus:border-black focus:ring-2 focus:ring-black/5 outline-none cursor-pointer"
+                                            <input
+                                                type="text"
+                                                onClick={() => { setActiveSelection('pickup'); setSuggestions([]); }}
+                                                onChange={(e) => handleInputChange(e.target.value, 'pickup')}
+                                                className="w-full p-4 pl-12 border border-gray-200 rounded-xl bg-gray-50 font-semibold focus:outline-none"
                                                 value={pickup}
-                                                onChange={(e) => setPickup(e.target.value)}
+                                                placeholder="Type or click map for Pickup"
                                                 required
-                                            >
-                                                <option value="" disabled>Select Pickup Location</option>
-                                                {locations.map(loc => <option key={loc._id} value={loc.name}>{loc.name}</option>)}
-                                            </select>
+                                            />
+                                            {activeSelection === 'pickup' && suggestions.length > 0 && (
+                                                <div className="absolute z-10 w-full bg-white border border-gray-200 rounded-xl shadow-lg mt-1 max-h-60 overflow-y-auto">
+                                                    {suggestions.map((s, i) => (
+                                                        <div key={i} className="p-3 hover:bg-gray-100 cursor-pointer text-sm border-b last:border-b-0 truncate" onClick={() => selectSuggestion(s)}>
+                                                            {s.display_name}
+                                                        </div>
+                                                    ))}
+                                                </div>
+                                            )}
                                         </div>
 
                                         {activeTab === 'rentals' ? (
@@ -222,17 +324,26 @@ const PassengerDashboard = () => {
                                                 </select>
                                             </div>
                                         ) : (
-                                            <div className="relative">
+                                            <div className={`relative transition ${activeSelection === 'destination' ? 'ring-2 ring-black rounded-xl' : ''}`}>
                                                 <span className="absolute inset-y-0 left-0 pl-4 flex items-center text-red-500">🏁</span>
-                                                <select
-                                                    className="w-full p-4 pl-12 border border-gray-200 rounded-xl bg-gray-50 font-semibold focus:border-black focus:ring-2 focus:ring-black/5 outline-none cursor-pointer"
+                                                <input
+                                                    type="text"
+                                                    onClick={() => { setActiveSelection('destination'); setSuggestions([]); }}
+                                                    onChange={(e) => handleInputChange(e.target.value, 'destination')}
+                                                    className="w-full p-4 pl-12 border border-gray-200 rounded-xl bg-gray-50 font-semibold focus:outline-none"
                                                     value={destination}
-                                                    onChange={(e) => setDestination(e.target.value)}
+                                                    placeholder="Type or click map for Destination"
                                                     required
-                                                >
-                                                    <option value="" disabled>Select Destination</option>
-                                                    {locations.map(loc => <option key={loc._id} value={loc.name}>{loc.name}</option>)}
-                                                </select>
+                                                />
+                                                {activeSelection === 'destination' && suggestions.length > 0 && (
+                                                    <div className="absolute z-10 w-full bg-white border border-gray-200 rounded-xl shadow-lg mt-1 max-h-60 overflow-y-auto">
+                                                        {suggestions.map((s, i) => (
+                                                            <div key={i} className="p-3 hover:bg-gray-100 cursor-pointer text-sm border-b last:border-b-0 truncate" onClick={() => selectSuggestion(s)}>
+                                                                {s.display_name}
+                                                            </div>
+                                                        ))}
+                                                    </div>
+                                                )}
                                             </div>
                                         )}
                                     </div>
@@ -302,14 +413,43 @@ const PassengerDashboard = () => {
                         </div>
 
                         <div className="flex-1">
-                            <div className="bg-white p-5 md:p-8 rounded-3xl shadow-sm border border-gray-100">
-                                <h3 className="text-xl font-bold mb-4">Why ride with us?</h3>
-                                <ul className="space-y-4 text-gray-600">
-                                    <li className="flex items-center gap-3"><span className="text-yellow-500">✓</span> Professional, vetted drivers</li>
-                                    <li className="flex items-center gap-3"><span className="text-yellow-500">✓</span> 24/7 dedicated support</li>
-                                    <li className="flex items-center gap-3"><span className="text-yellow-500">✓</span> Real-time ride tracking</li>
-                                    <li className="flex items-center gap-3"><span className="text-yellow-500">✓</span> Affordable upfront pricing</li>
-                                </ul>
+                            <div className="bg-white rounded-3xl shadow-sm border border-gray-100 overflow-hidden" style={{ minHeight: '420px' }}>
+                                {/* Map header */}
+                                <div className="flex items-center gap-2 px-5 py-4 border-b border-gray-100">
+                                    <span className="w-2.5 h-2.5 bg-green-400 rounded-full animate-pulse"></span>
+                                    <h3 className="text-sm font-bold text-gray-700">Route Preview</h3>
+                                    {routeInfo && (
+                                        <span className="ml-auto text-xs font-bold text-gray-500">
+                                            {(routeInfo.distanceM / 1000).toFixed(1)} km
+                                            &nbsp;&bull;&nbsp;
+                                            {Math.ceil(routeInfo.durationS / 60)} min
+                                        </span>
+                                    )}
+                                </div>
+                                {(() => {
+                                    const center = pickupPos
+                                        ? [pickupPos[1], pickupPos[0]]
+                                        : myLocation 
+                                            ? [myLocation.lat, myLocation.lng] 
+                                            : [11.0168, 76.9558];
+                                    return (
+                                        <div style={{ height: '380px' }}>
+                                            <LeafletMap
+                                                center={center}
+                                                zoom={13}
+                                                height="380px"
+                                                myPos={myLocation}
+                                                pickupPos={pickupPos || null}
+                                                destPos={activeTab !== 'rentals' ? (destPos || null) : null}
+                                                pickupLabel={pickup || 'Pickup'}
+                                                destLabel={destination || 'Destination'}
+                                                showRoute={activeTab !== 'rentals'}
+                                                onRouteInfo={setRouteInfo}
+                                                onMapClick={handleMapClick}
+                                            />
+                                        </div>
+                                    );
+                                })()}
                             </div>
                         </div>
                     </div>

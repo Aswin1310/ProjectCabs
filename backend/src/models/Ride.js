@@ -58,6 +58,11 @@ const rideSchema = new mongoose.Schema(
       enum: ['4 Seater', '5 Seater', '6 Seater', '7 Seater', 'Mini', 'Sedan', 'SUV', 'Auto'],
       required: true,
     },
+    rideType: {
+      type: String,
+      enum: ['daily', 'outstation', 'rentals'],
+      default: 'daily',
+    },
     rideStatus: {
       type: String,
       enum: ['pending', 'accepted', 'started', 'completed', 'cancelled'],

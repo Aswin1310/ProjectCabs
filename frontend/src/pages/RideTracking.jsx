@@ -3,6 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom';
 import api from '../services/api';
 import { useAuth } from '../context/AuthContext';
 import { io } from 'socket.io-client';
+import LeafletMap from '../components/LeafletMap';
 
 const SOCKET_URL = 'http://localhost:5000';
 
@@ -155,11 +156,26 @@ const RideTracking = () => {
             if (!chatOpen) setUnread(u => u + 1);
         });
 
-        /* ── GPS tracking (if driver: broadcast location; if passenger: share optionally) ── */
-        if (navigator.geolocation) {
+        /* ── GPS tracking ── */
+        const setupGeo = async () => {
+            if (!navigator.geolocation) {
+                showToast('Geolocation not supported by this browser.', 'error');
+                return;
+            }
+            try {
+                const status = await navigator.permissions.query({ name: 'geolocation' });
+                if (status.state === 'denied') {
+                    showToast('GPS permission denied. Reset by clicking the tune icon next to the URL, then reload.', 'error');
+                    return;
+                }
+            } catch (err) {
+                // permissions API not supported on older browsers, continue anyway
+            }
+
             geoWatcher = navigator.geolocation.watchPosition(
                 (pos) => {
                     const { longitude, latitude } = pos.coords;
+                    if (!isFinite(latitude) || !isFinite(longitude)) return;
                     setMyPos({ lng: longitude, lat: latitude });
 
                     if (isDriver && sock.connected) {
@@ -171,17 +187,23 @@ const RideTracking = () => {
                             passengerId: ridePassengerId?.toString(),
                         });
                     } else if (!isDriver && sock.connected) {
-                        // Passenger optionally shares location to driver
                         const rideDriverUserId = ride?.driverId?.userId;
                         if (rideDriverUserId) {
                             sock.emit('passengerLocation', { longitude, latitude, rideId: id, driverUserId: rideDriverUserId });
                         }
                     }
                 },
-                (err) => console.warn('Geolocation error:', err.message),
+                (err) => {
+                    if (err.code === 1) {
+                        showToast('GPS permission denied. Reset by clicking the tune icon next to the URL, then reload.', 'error');
+                    } else {
+                        console.warn('Geolocation error:', err.message);
+                    }
+                },
                 { enableHighAccuracy: true, maximumAge: 5000, timeout: 10000 }
             );
-        }
+        };
+        setupGeo();
 
         return () => {
             sock.emit('leaveRideRoom', { rideId: id });
@@ -392,29 +414,24 @@ const RideTracking = () => {
             </div>
 
             {/* ════════════════════════════════════════════
-                RIGHT PANEL – Map + Chat
+                RIGHT PANEL – Live OpenStreetMap
             ════════════════════════════════════════════ */}
             <div className="flex-1 relative min-h-[400px]">
-                {/* Simulated map */}
-                <img
-                    src="https://images.unsplash.com/photo-1524661135-423995f22d0b?ixlib=rb-4.0.3&auto=format&fit=crop&w=1600&q=80"
-                    alt="Map"
-                    className="w-full h-full object-cover"
+                <LeafletMap
+                    height="100%"
+                    zoom={14}
+                    center={
+                        ride?.pickupCoordinates
+                            ? [ride.pickupCoordinates[1], ride.pickupCoordinates[0]]
+                            : [11.0168, 76.9558]
+                    }
+                    driverPos={driverPos}
+                    myPos={myPos}
+                    pickupPos={ride?.pickupCoordinates || null}
+                    destPos={ride?.destinationCoordinates || null}
+                    pickupLabel={ride?.pickup || 'Pickup'}
+                    destLabel={ride?.destination || 'Destination'}
                 />
-
-                {/* Live GPS indicators */}
-                {driverPos && (
-                    <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 flex flex-col items-center">
-                        <div className="w-8 h-8 bg-blue-500 border-4 border-white rounded-full shadow-xl animate-pulse"></div>
-                        <span className="text-xs bg-blue-500 text-white px-2 py-0.5 rounded-full mt-1 font-bold">Driver</span>
-                    </div>
-                )}
-                {myPos && !isDriver && (
-                    <div className="absolute top-1/3 left-1/3 -translate-x-1/2 -translate-y-1/2 flex flex-col items-center">
-                        <div className="w-8 h-8 bg-red-500 border-4 border-white rounded-full shadow-xl"></div>
-                        <span className="text-xs bg-red-500 text-white px-2 py-0.5 rounded-full mt-1 font-bold">You</span>
-                    </div>
-                )}
 
                 {/* Live GPS badge */}
                 <div className="absolute top-4 right-4 bg-white/90 backdrop-blur-md px-4 py-2 rounded-xl shadow-xl flex items-center gap-2 text-sm font-bold">

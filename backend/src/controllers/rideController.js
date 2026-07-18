@@ -8,7 +8,7 @@ import { cacheRideState, deleteCachedRide, verifyRideOTP, getRideOTPAttempts, in
 // @route   POST /api/rides
 // @access  Private (Passenger)
 export const createRide = async (req, res) => {
-  const { pickup, destination, pickupCoordinates, destinationCoordinates, distance, duration, fare, cabType } = req.body;
+  const { pickup, destination, pickupCoordinates, destinationCoordinates, distance, duration, fare, cabType, rideType } = req.body;
 
   try {
     // Find drivers who are currently busy with accepted or started rides
@@ -20,34 +20,13 @@ export const createRide = async (req, res) => {
 
     let nearestDriver = null;
 
-    // 1. Try geo search with matching cabType
-    try {
-      nearestDriver = await Driver.findOne({
-        isOnline: true,
-        vehicleType: cabType,
-        _id: { $nin: busyDriverIds },
-        currentLocation: {
-          $near: {
-            $geometry: { type: 'Point', coordinates: pickupCoordinates }
-          }
-        }
-      });
-    } catch (_) {}
-
-    // 2. Fallback: any online matching cabType (no geo requirement)
-    if (!nearestDriver) {
-      nearestDriver = await Driver.findOne({
-        isOnline: true,
-        vehicleType: cabType,
-        _id: { $nin: busyDriverIds }
-      });
-    }
-
-    // 3. Fallback: any online driver via geo regardless of cab type
-    if (!nearestDriver) {
+    // Only search for drivers if it's a daily ride. Rentals and outstations go to admin.
+    if (rideType !== 'outstation' && rideType !== 'rentals') {
+      // 1. Try geo search with matching cabType
       try {
         nearestDriver = await Driver.findOne({
           isOnline: true,
+          vehicleType: cabType,
           _id: { $nin: busyDriverIds },
           currentLocation: {
             $near: {
@@ -56,14 +35,38 @@ export const createRide = async (req, res) => {
           }
         });
       } catch (_) {}
-    }
 
-    // 4. Last resort: any online driver at all
-    if (!nearestDriver) {
-      nearestDriver = await Driver.findOne({
-        isOnline: true,
-        _id: { $nin: busyDriverIds }
-      });
+      // 2. Fallback: any online matching cabType (no geo requirement)
+      if (!nearestDriver) {
+        nearestDriver = await Driver.findOne({
+          isOnline: true,
+          vehicleType: cabType,
+          _id: { $nin: busyDriverIds }
+        });
+      }
+
+      // 3. Fallback: any online driver via geo regardless of cab type
+      if (!nearestDriver) {
+        try {
+          nearestDriver = await Driver.findOne({
+            isOnline: true,
+            _id: { $nin: busyDriverIds },
+            currentLocation: {
+              $near: {
+                $geometry: { type: 'Point', coordinates: pickupCoordinates }
+              }
+            }
+          });
+        } catch (_) {}
+      }
+
+      // 4. Last resort: any online driver at all
+      if (!nearestDriver) {
+        nearestDriver = await Driver.findOne({
+          isOnline: true,
+          _id: { $nin: busyDriverIds }
+        });
+      }
     }
 
     const ride = await Ride.create({
@@ -76,6 +79,7 @@ export const createRide = async (req, res) => {
       duration,
       fare,
       cabType,
+      rideType: rideType || 'daily',
       driverId: nearestDriver ? nearestDriver._id : null,
       rideStatus: 'pending',
     });
@@ -83,9 +87,13 @@ export const createRide = async (req, res) => {
     // Notify the driver directly via socket (most reliable — no client-side timing issue)
     try {
       const io = getIO();
-      io.emit('adminRideUpdate', { message: 'New ride created', rideId: ride._id });
+      // Notify Admin
+      io.emit('adminRideUpdate', { message: 'New ride created', rideId: ride._id, rideType: ride.rideType });
 
-      if (nearestDriver) {
+      if (ride.rideType === 'outstation' || ride.rideType === 'rentals') {
+         // Special rides are not emitted to drivers yet. Wait for admin assignment.
+         console.log(`📨 Ride ${ride._id} is ${ride.rideType}, waiting for admin assignment.`);
+      } else if (nearestDriver) {
         const populatedRide = await Ride.findById(ride._id).populate('passengerId', 'name phone');
         const driverUserId = nearestDriver.userId.toString();
         const driverSocketId = activeDrivers.get(driverUserId);
@@ -101,10 +109,12 @@ export const createRide = async (req, res) => {
     }
 
     // Return driverFound flag so the passenger knows immediately if no driver exists
+    // For outstation/rentals, pretend we found a driver so the app waits for admin
     res.status(201).json({
       ...ride.toObject(),
-      driverFound: !!nearestDriver,
+      driverFound: (ride.rideType === 'outstation' || ride.rideType === 'rentals') ? true : !!nearestDriver,
       driverUserId: nearestDriver?.userId?.toString() || null,
+      message: (ride.rideType === 'outstation' || ride.rideType === 'rentals') ? 'Sent to admin for driver assignment' : 'Driver found'
     });
   } catch (error) {
     console.error(error);

@@ -17,18 +17,15 @@ const DriverDashboard = () => {
     const [totalTrips, setTotalTrips]     = useState(0);
     const [myLocation, setMyLocation]     = useState(null);
     const [myLocationName, setMyLocationName] = useState('');
-    const [locations, setLocations]       = useState([]);
+
     const [radarActive, setRadarActive]   = useState(false); // only true after manual toggle click
     const [rides, setRides]               = useState([]);
-    const [selectedDate, setSelectedDate] = useState(new Date().toISOString().split('T')[0]);
-    const [mainTab, setMainTab] = useState('overview');
 
     // Stats states
     const [stats, setStats] = useState({
         today: { trips: 0, earnings: 0 },
         month: { trips: 0, earnings: 0 },
-        allTime: { trips: 0, earnings: 0 },
-        selected: { trips: 0, earnings: 0 }
+        allTime: { trips: 0, earnings: 0 }
     });
 
     /* countdown timer for incoming ride */
@@ -43,8 +40,7 @@ const DriverDashboard = () => {
             try {
                 const [profileRes, ridesRes, locRes] = await Promise.all([
                     api.get('/driver/me').catch(() => null),
-                    api.get('/rides').catch(() => ({ data: [] })),
-                    api.get('/locations').catch(() => ({ data: [] }))
+                    api.get('/rides').catch(() => ({ data: [] }))
                 ]);
                 
                 if (profileRes?.data) {
@@ -54,11 +50,9 @@ const DriverDashboard = () => {
                 }
                 if (ridesRes?.data) {
                     setRides(ridesRes.data);
-                    calculateStats(ridesRes.data, selectedDate);
+                    calculateStats(ridesRes.data);
                 }
-                if (locRes?.data) {
-                    setLocations(locRes.data);
-                }
+
             } catch (err) {
                 console.error('Fetch error:', err);
             }
@@ -67,7 +61,7 @@ const DriverDashboard = () => {
         // eslint-disable-next-line
     }, []);
 
-    const calculateStats = (allRides, dateFilter) => {
+    const calculateStats = (allRides) => {
         const completed = allRides.filter(r => r.rideStatus === 'completed' || r.paymentStatus === 'paid');
         const now = new Date();
         const todayStr = now.toISOString().split('T')[0];
@@ -94,24 +88,13 @@ const DriverDashboard = () => {
                 monthTrips++;
                 monthEarn += fare;
             }
-            if (rDateStr === dateFilter) {
-                selTrips++;
-                selEarn += fare;
-            }
         });
 
         setStats({
             today: { trips: todayTrips, earnings: todayEarn },
             month: { trips: monthTrips, earnings: monthEarn },
-            allTime: { trips: allTrips, earnings: allEarn },
-            selected: { trips: selTrips, earnings: selEarn }
+            allTime: { trips: allTrips, earnings: allEarn }
         });
-    };
-
-    const handleDateChange = (e) => {
-        const d = e.target.value;
-        setSelectedDate(d);
-        calculateStats(rides, d);
     };
 
 
@@ -145,6 +128,12 @@ const DriverDashboard = () => {
         sock.on('rideCancelled', () => {
             setIncomingRide(null);
             clearCountdown();
+        });
+
+        /* Special ride explicitly assigned by Admin */
+        sock.on('rideAssigned', (data) => {
+            alert(`🚨 ${data.message}`);
+            navigate(`/ride/${data.rideId}`);
         });
 
         return () => {
@@ -188,7 +177,21 @@ const DriverDashboard = () => {
         geoWatchRef.current = navigator.geolocation.watchPosition(
             (pos) => {
                 const { longitude, latitude } = pos.coords;
+                if (!isFinite(latitude) || !isFinite(longitude)) return;
                 setMyLocation({ lng: longitude, lat: latitude });
+
+                // Live Update Pinned GPS Name
+                setMyLocationName(prev => {
+                    if (!prev || prev.includes('.')) {
+                        fetch(`https://nominatim.openstreetmap.org/reverse?lat=${latitude}&lon=${longitude}&format=json`)
+                            .then(r => r.json())
+                            .then(data => {
+                                const address = data.display_name?.split(',').slice(0, 3).join(',') || `${latitude.toFixed(4)}, ${longitude.toFixed(4)}`;
+                                setMyLocationName(address);
+                            }).catch(() => {});
+                    }
+                    return prev;
+                });
 
                 // Update Redis geo-cache via REST
                 api.put('/driver/location', { longitude, latitude }).catch(() => {});
@@ -198,7 +201,12 @@ const DriverDashboard = () => {
                     sock.emit('locationUpdate', { longitude, latitude });
                 }
             },
-            (err) => console.warn('Geo error:', err.message),
+            (err) => {
+                if (err.code === 1) { // PERMISSION_DENIED
+                    alert('GPS permission denied. Please reset it by clicking the tune icon next to the URL, then reload.');
+                }
+                console.warn('Geo error:', err.message);
+            },
             { enableHighAccuracy: true, maximumAge: 5000, timeout: 10000 }
         );
     };
@@ -210,17 +218,7 @@ const DriverDashboard = () => {
         }
     };
 
-    /* ── Update driver location from admin location list ─── */
-    const updateDriverLocation = (locationName) => {
-        const loc = locations.find(l => l.name === locationName);
-        if (!loc) return;
-        const longitude = loc.coordinates[0];
-        const latitude  = loc.coordinates[1];
-        setMyLocationName(locationName);
-        setMyLocation({ lng: longitude, lat: latitude });
-        api.put('/driver/location', { longitude, latitude }).catch(() => {});
-        if (socket?.connected) socket.emit('locationUpdate', { longitude, latitude });
-    };
+
 
     /* ── Toggle online / offline ────────────────── */
     const toggleStatus = async () => {
@@ -312,174 +310,42 @@ const DriverDashboard = () => {
                     </div>
                 </div>
 
-                {/* Tabs NAVIGATION */}
-                <div className="flex flex-wrap gap-3 mb-8 border-b border-gray-200 pb-5">
-                    {['overview', 'history'].map(tab => {
-                        const tabNames = { overview: 'Overview', history: 'Earnings & History' };
-                        return (
-                            <button
-                                key={tab}
-                                onClick={() => setMainTab(tab)}
-                                className={`px-5 py-2.5 rounded-xl font-bold text-sm transition-all outline-none ${mainTab === tab ? 'bg-gray-900 text-white shadow-md' : 'bg-white text-gray-600 hover:bg-gray-100 border border-gray-200'}`}
-                            >
-                                {tabNames[tab]}
-                            </button>
-                        );
-                    })}
-                </div>
-
-                {mainTab === 'overview' && (
-                    <div className="space-y-6">
-                        {/* Stats grid */}
-                <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                    {[
-                        { label: "Today's",        val1: `Earned: $${stats.today.earnings}`, val2: `Trips: ${stats.today.trips}`, icon: '⚡', color: 'text-green-600' },
-                        { label: 'This Month',      val1: `Earned: $${stats.month.earnings}`, val2: `Trips: ${stats.month.trips}`, icon: '📅', color: 'text-blue-600' },
-                        { label: 'All-Time',        val1: `Earned: $${stats.allTime.earnings}`, val2: `Trips: ${stats.allTime.trips}`, icon: '🏆', color: 'text-purple-600' },
-                        { label: 'GPS / Status',    val1: isOnline ? 'Online' : 'Offline', val2: myLocation ? 'Location Active' : 'Location Off', icon: isOnline ? '🟢' : '⚫', color: isOnline ? 'text-green-600' : 'text-gray-500' },
-                    ].map((stat, i) => (
-                        <div key={i} className="bg-white rounded-2xl p-5 shadow-sm border border-gray-100 flex flex-col justify-between">
-                            <span className="text-2xl">{stat.icon}</span>
-                            <div className="mt-3">
-                                <p className="text-xs text-gray-500 font-bold uppercase tracking-wide">{stat.label}</p>
-                                <p className={`text-xl font-black mt-1 ${stat.color} truncate`}>{stat.val1}</p>
-                                <p className={`text-sm font-semibold mt-1 text-gray-400 truncate`}>{stat.val2}</p>
+                <div className="space-y-6">
+                    {/* Stats grid */}
+                    <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                        {[
+                            { label: "Today's",        val1: `Earned: $${stats.today.earnings}`, val2: `Trips: ${stats.today.trips}`, icon: '⚡', color: 'text-green-600' },
+                            { label: 'This Month',      val1: `Earned: $${stats.month.earnings}`, val2: `Trips: ${stats.month.trips}`, icon: '📅', color: 'text-blue-600' },
+                            { label: 'All-Time',        val1: `Earned: $${stats.allTime.earnings}`, val2: `Trips: ${stats.allTime.trips}`, icon: '🏆', color: 'text-purple-600' },
+                            { label: 'GPS / Status',    val1: isOnline ? 'Online' : 'Offline', val2: myLocation ? 'Location Active' : 'Location Off', icon: isOnline ? '🟢' : '⚫', color: isOnline ? 'text-green-600' : 'text-gray-500' },
+                        ].map((stat, i) => (
+                            <div key={i} className="bg-white rounded-2xl p-5 shadow-sm border border-gray-100 flex flex-col justify-between">
+                                <span className="text-2xl">{stat.icon}</span>
+                                <div className="mt-3">
+                                    <p className="text-xs text-gray-500 font-bold uppercase tracking-wide">{stat.label}</p>
+                                    <p className={`text-xl font-black mt-1 ${stat.color} truncate`}>{stat.val1}</p>
+                                    <p className={`text-sm font-semibold mt-1 text-gray-400 truncate`}>{stat.val2}</p>
+                                </div>
                             </div>
-                        </div>
-                    ))}
-                </div>
-                {/* Custom Date Stats Moved to History Tab */}
-
-                {/* ── Location Pin (shows when online) ── */}
-                {isOnline && (
-                    <div className="bg-white rounded-2xl p-6 shadow-sm border border-gray-100 flex flex-col md:flex-row items-center gap-4">
-                        <div className="flex-1 w-full">
-                            <h3 className="text-lg font-bold">📍 Pin Your Current Location</h3>
-                            <p className="text-gray-500 text-sm">Select where you are stationed so passengers can find you</p>
-                        </div>
-                        <select
-                            className="w-full md:w-64 p-3 border-2 border-gray-200 rounded-xl outline-none focus:ring-2 focus:ring-green-500 font-semibold text-gray-700 bg-gray-50"
-                            value={myLocationName}
-                            onChange={(e) => updateDriverLocation(e.target.value)}
-                        >
-                            <option value="" disabled>Select your location...</option>
-                            {locations.map(loc => (
-                                <option key={loc._id} value={loc.name}>{loc.name}</option>
-                            ))}
-                        </select>
-                        {myLocationName && (
-                            <span className="text-green-600 font-bold text-sm whitespace-nowrap">✅ Pinned: {myLocationName}</span>
-                        )}
+                        ))}
                     </div>
-                )}
 
-                {/* ── Radar / waiting card — only shows after clicking Status toggle ── */}
-                {radarActive ? (
-                <div className="bg-white rounded-2xl p-8 shadow-sm border border-gray-100 text-center relative overflow-hidden">
-                    {isOnline ? (
-                        <>
-                            <div className="absolute inset-0 bg-green-50 opacity-50 animate-pulse pointer-events-none"></div>
-                            <div className="relative z-10">
-                                <div className="w-20 h-20 border-4 border-green-400 border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
-                                <h3 className="text-xl font-bold text-gray-700">Radar Active</h3>
-                                <p className="text-gray-400 mt-1">Waiting for ride requests nearby...</p>
+                    {/* ── Location Pin (shows when online) ── */}
+                    {isOnline && (
+                        <div className="bg-white rounded-2xl p-6 shadow-sm border border-gray-100 flex items-center justify-between gap-4">
+                            <div>
+                                <h3 className="text-lg font-bold">📍 Current Active Location</h3>
+                                <p className="text-gray-500 text-sm">This is where passengers see you right now.</p>
                             </div>
-                        </>
-                    ) : (
-                        <>
-                            <div className="w-20 h-20 bg-gray-100 rounded-full flex items-center justify-center mx-auto mb-4">
-                                <span className="text-4xl">😴</span>
-                            </div>
-                            <h3 className="text-xl font-bold text-gray-400">You are offline</h3>
-                            <p className="text-gray-400 text-sm mt-1">Go online to receive ride requests.</p>
-                        </>
+                            {myLocationName && (
+                                <div className="bg-green-50 px-4 py-2 rounded-xl border border-green-100 flex items-center gap-2">
+                                    <span className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></span>
+                                    <span className="text-green-700 font-bold text-sm whitespace-nowrap">{myLocationName}</span>
+                                </div>
+                            )}
+                        </div>
                     )}
-                    </div>
-                ) : null}
-                    </div>
-                )}
-
-                {mainTab === 'history' && (
-                    <div className="space-y-6">
-                        {/* Custom Date Stats */}
-                        <div className="bg-white rounded-2xl p-6 shadow-sm border border-gray-100 flex flex-col md:flex-row items-center gap-4 md:gap-6">
-                            <div className="flex-1 w-full text-center md:text-left">
-                               <h3 className="text-lg font-bold">Historical Statistics by Date</h3>
-                               <p className="text-gray-500 text-sm">Select any date to view your exact earnings and trips for that day</p>
-                            </div>
-                            <div className="flex items-center gap-4 bg-gray-50 p-3 rounded-xl border border-gray-100 shadow-inner w-full md:w-auto overflow-hidden">
-                                <input 
-                                    type="date" 
-                                    name="stat-date"
-                                    value={selectedDate}
-                                    onChange={handleDateChange}
-                                    className="bg-transparent font-bold text-gray-700 outline-none w-full"
-                                />
-                            </div>
-                            <div className="flex w-full md:w-auto justify-around md:justify-end gap-6 mt-4 md:mt-0">
-                                <div className="text-center md:text-right min-w-[80px]">
-                                    <p className="text-xs text-gray-400 font-bold uppercase">Trips</p>
-                                    <p className="text-2xl font-black text-gray-800">{stats.selected.trips}</p>
-                                </div>
-                                <div className="text-center md:text-right min-w-[80px]">
-                                    <p className="text-xs text-gray-400 font-bold uppercase">Earnings</p>
-                                    <p className="text-2xl font-black text-green-600">${stats.selected.earnings}</p>
-                                </div>
-                            </div>
-                        </div>
-
-                        {/* Recent Rides Table */}
-                        <div className="bg-white rounded-3xl shadow-sm border border-gray-100 overflow-hidden">
-                            <div className="p-6 border-b border-gray-100 bg-gray-50">
-                                <h2 className="text-xl font-bold">Your Managed Rides</h2>
-                            </div>
-                            <div className="overflow-x-auto">
-                                <table className="min-w-full divide-y divide-gray-100">
-                                    <thead className="bg-white">
-                                        <tr>
-                                            {['Date', 'Route', 'Passenger', 'Fare', 'Status'].map(h => (
-                                                <th key={h} className="px-6 py-4 text-left text-xs font-bold text-gray-500 uppercase tracking-wider">{h}</th>
-                                            ))}
-                                        </tr>
-                                    </thead>
-                                    <tbody className="bg-white divide-y divide-gray-100">
-                                        {rides.length > 0 ? rides.map(r => (
-                                            <tr key={r._id} className="hover:bg-gray-50 transition cursor-pointer" onClick={() => navigate(`/ride/${r._id}`)}>
-                                                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-600 font-medium">
-                                                    {new Date(r.createdAt).toLocaleDateString()}
-                                                </td>
-                                                <td className="px-6 py-4 text-sm max-w-[200px]">
-                                                    <div className="font-bold text-gray-800 truncate">{r.pickup} → {r.destination}</div>
-                                                </td>
-                                                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-600">
-                                                    {r.passengerId?.name || 'User'}
-                                                </td>
-                                                <td className="px-6 py-4 whitespace-nowrap text-sm font-bold text-green-600">
-                                                    ${r.fare}
-                                                </td>
-                                                <td className="px-6 py-4 whitespace-nowrap">
-                                                    <span className={`px-3 py-1 inline-flex text-xs leading-5 font-bold rounded-full ${
-                                                        r.rideStatus === 'completed' ? 'bg-green-100 text-green-800' :
-                                                        r.rideStatus === 'cancelled' ? 'bg-red-100 text-red-800' :
-                                                        'bg-yellow-100 text-yellow-800'
-                                                    }`}>
-                                                        {r.rideStatus}
-                                                    </span>
-                                                </td>
-                                            </tr>
-                                        )) : (
-                                            <tr>
-                                                <td colSpan="5" className="px-6 py-10 text-center text-gray-400">
-                                                    No rides found.
-                                                </td>
-                                            </tr>
-                                        )}
-                                    </tbody>
-                                </table>
-                            </div>
-                        </div>
-                    </div>
-                )}
+                </div>
             </div>
 
             {/* ════════════════════════════════

@@ -12,10 +12,6 @@ const AdminDashboard = () => {
     const [driversList, setDriversList] = useState([]);
     const [ridesList, setRidesList]   = useState([]);
     const [loading, setLoading]       = useState(true);
-    const [locations, setLocations]   = useState([]);
-    const [newLocName, setNewLocName] = useState('');
-    const [newLocLat, setNewLocLat]   = useState('');
-    const [newLocLng, setNewLocLng]   = useState('');
 
     // Live socket counters
     const [liveOnlineDrivers, setLiveOnlineDrivers]       = useState(0);
@@ -37,6 +33,10 @@ const AdminDashboard = () => {
     const [selectedDriver, setSelectedDriver] = useState(null);
     const [driverModalDate, setDriverModalDate] = useState(new Date().toISOString().split('T')[0]);
 
+    // Driver assignment modal
+    const [assignRideId, setAssignRideId] = useState(null);
+    const [assignDriverId, setAssignDriverId] = useState('');
+
     const addActivity = (msg) => setActivityLog(prev => [{ msg, ts: new Date().toLocaleTimeString() }, ...prev.slice(0, 49)]);
 
     const openDriverStats = async (driverId) => {
@@ -51,18 +51,16 @@ const AdminDashboard = () => {
 
     const fetchDashboardData = async () => {
         try {
-            const [statsRes, usersRes, driversRes, ridesRes, locRes] = await Promise.all([
+            const [statsRes, usersRes, driversRes, ridesRes] = await Promise.all([
                 api.get('/admin/dashboard'),
                 api.get('/admin/users'),
                 api.get('/admin/drivers'),
-                api.get('/admin/rides'),
-                api.get('/locations')
+                api.get('/admin/rides')
             ]);
             setStats(statsRes.data);
             setUsersList(usersRes.data);
             setDriversList(driversRes.data);
             setRidesList(ridesRes.data);
-            setLocations(locRes.data || []);
             setLoading(false);
         } catch (error) {
             console.error('Failed to fetch admin data', error);
@@ -81,6 +79,9 @@ const AdminDashboard = () => {
         socket.on('connect', () => console.log('Admin socket connected'));
 
         socket.on('adminRideUpdate', (data) => {
+            if (data.rideType === 'rentals' || data.rideType === 'outstation') {
+                alert(`🔔 New ${data.rideType} order received! Check the ${data.rideType} tab.`);
+            }
             addActivity(`🚗 ${data.event?.replace(/_/g, ' ') || 'Ride update'} [${(data.rideId?.toString() || '').slice(-6).toUpperCase()}]`);
             fetchDashboardData();
         });
@@ -116,17 +117,6 @@ const AdminDashboard = () => {
         return () => socket.close();
     }, [user.token]);
 
-    const handleAddLocation = async (e) => {
-        e.preventDefault();
-        try {
-            const res = await api.post('/locations', { name: newLocName, latitude: newLocLat, longitude: newLocLng });
-            setLocations([...locations, res.data]);
-            setNewLocName(''); setNewLocLat(''); setNewLocLng('');
-            alert('Location added successfully');
-        } catch (err) {
-            alert('Failed to add location: ' + (err.response?.data?.message || err.message));
-        }
-    };
 
     const handleDeleteRide = async (rideId) => {
         if (!window.confirm('Permanently delete this ride record?')) return;
@@ -136,6 +126,19 @@ const AdminDashboard = () => {
             addActivity(`🗑 Ride ${rideId.slice(-6).toUpperCase()} deleted by admin`);
         } catch (err) {
             alert(err.response?.data?.message || 'Failed to delete ride');
+        }
+    };
+
+    const handleAssignDriver = async () => {
+        if (!assignRideId || !assignDriverId) return alert('Please select a driver');
+        try {
+            await api.put(`/admin/rides/${assignRideId}/assign`, { driverId: assignDriverId });
+            alert('Driver assigned successfully!');
+            setAssignRideId(null);
+            setAssignDriverId('');
+            fetchDashboardData();
+        } catch (err) {
+            alert(err.response?.data?.message || 'Failed to assign driver');
         }
     };
 
@@ -171,12 +174,14 @@ const AdminDashboard = () => {
 
                 {/* Tabs NAVIGATION */}
                 <div className="flex flex-wrap gap-3 mb-8 border-b border-gray-200 pb-5">
-                    {['dashboard', 'users', 'drivers', 'rides', 'activity'].map(tab => {
+                    {['dashboard', 'users', 'drivers', 'rides', 'rentals', 'outstation', 'activity'].map(tab => {
                         const tabNames = {
                             dashboard: 'Dashboard',
                             users: 'User Overview',
                             drivers: 'Driver Overview',
                             rides: 'Live Ride Track',
+                            rentals: 'Rental Orders',
+                            outstation: 'Outstation Orders',
                             activity: 'Live Activity'
                         };
                         return (
@@ -265,36 +270,6 @@ const AdminDashboard = () => {
                     </div>
                 )}
 
-                {/* Locations Management */}
-                {activeTab === 'dashboard' && (
-                    <div className="bg-white p-6 rounded-3xl shadow-sm border border-gray-100 mb-8">
-                    <h2 className="text-2xl font-bold mb-6">Manage Service Locations</h2>
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-                        <div>
-                            <h3 className="text-lg font-bold mb-4">Add New Location</h3>
-                            <form onSubmit={handleAddLocation} className="space-y-4">
-                                <input type="text" placeholder="Location Name (e.g. RS Puram)" value={newLocName} onChange={e => setNewLocName(e.target.value)} required className="w-full p-3 border border-gray-300 rounded-xl outline-none focus:ring-2 focus:ring-gray-800" />
-                                <div className="flex gap-4">
-                                    <input type="number" step="any" placeholder="Latitude" value={newLocLat} onChange={e => setNewLocLat(e.target.value)} required className="w-1/2 p-3 border border-gray-300 rounded-xl outline-none focus:ring-2 focus:ring-gray-800" />
-                                    <input type="number" step="any" placeholder="Longitude" value={newLocLng} onChange={e => setNewLocLng(e.target.value)} required className="w-1/2 p-3 border border-gray-300 rounded-xl outline-none focus:ring-2 focus:ring-gray-800" />
-                                </div>
-                                <button type="submit" className="bg-gray-900 text-white font-bold py-3 px-6 rounded-xl hover:bg-gray-800 transition shadow-md">Add Location</button>
-                            </form>
-                        </div>
-                        <div>
-                            <h3 className="text-lg font-bold mb-4">Active Locations</h3>
-                            <div className="max-h-60 overflow-y-auto space-y-2 pr-2">
-                                {locations.length > 0 ? locations.map(loc => (
-                                    <div key={loc._id} className="p-4 bg-gray-50 rounded-xl border border-gray-100 flex justify-between items-center">
-                                        <p className="font-bold text-gray-800">{loc.name}</p>
-                                        <p className="text-xs text-gray-500">{loc.coordinates?.[1]}, {loc.coordinates?.[0]}</p>
-                                    </div>
-                                )) : <p className="text-gray-500 text-sm">No locations added yet.</p>}
-                            </div>
-                        </div>
-                    </div>
-                </div>
-                )}
 
 
                 {/* ══════════════════════════════════════════
@@ -453,6 +428,78 @@ const AdminDashboard = () => {
                 </div>
                 )}
 
+                {/* ══════════════════════════════════════════
+                    RENTALS & OUTSTATION ORDERS 
+                ══════════════════════════════════════════ */}
+                {(activeTab === 'rentals' || activeTab === 'outstation') && (
+                <div className="bg-white rounded-3xl shadow-sm border border-gray-100 mb-8 overflow-hidden">
+                    <div className="flex justify-between items-center px-6 py-5 border-b border-gray-100">
+                        <div className="flex items-center gap-3">
+                            <h2 className="text-2xl font-bold capitalize">{activeTab} Orders</h2>
+                        </div>
+                    </div>
+                    <div className="overflow-x-auto">
+                        <table className="min-w-full divide-y divide-gray-100">
+                            <thead className="bg-gray-50">
+                                <tr>
+                                    {['Ride ID', 'Passenger', 'Route / Package', 'Status', 'Driver', 'Actions'].map(h => (
+                                        <th key={h} className="px-5 py-3 text-left text-xs font-bold text-gray-500 uppercase tracking-wider">{h}</th>
+                                    ))}
+                                </tr>
+                            </thead>
+                            <tbody className="bg-white divide-y divide-gray-100">
+                                {ridesList.filter(r => r.rideType === activeTab).length > 0 ? ridesList.filter(r => r.rideType === activeTab).map(r => (
+                                    <tr key={r._id} className="hover:bg-gray-50 transition">
+                                        <td className="px-5 py-4 whitespace-nowrap text-sm font-bold text-gray-900 font-mono">
+                                            {r._id.toString().slice(-8).toUpperCase()}
+                                        </td>
+                                        <td className="px-5 py-4 whitespace-nowrap text-sm">
+                                            <div className="font-bold text-gray-800">{r.passengerId?.name || 'Deleted'}</div>
+                                            <div className="text-xs text-gray-400">{r.passengerId?.phone || ''}</div>
+                                        </td>
+                                        <td className="px-5 py-4 text-sm max-w-[200px]">
+                                            <div className="font-medium text-gray-700 truncate">{r.pickup} → {r.destination}</div>
+                                        </td>
+                                        <td className="px-5 py-4 whitespace-nowrap">
+                                            <span className={`px-3 py-1 inline-flex text-xs leading-5 font-bold rounded-full ${statusColors[r.rideStatus] || 'bg-gray-100 text-gray-700'}`}>
+                                                {r.rideStatus}
+                                            </span>
+                                        </td>
+                                        <td className="px-5 py-4 whitespace-nowrap text-sm">
+                                            {r.driverId ? (
+                                                <div className="font-semibold text-gray-700">{r.driverId.userId?.name || 'Assigned'}</div>
+                                            ) : <span className="text-gray-400 italic text-xs">Unassigned</span>}
+                                        </td>
+                                        <td className="px-5 py-4 whitespace-nowrap">
+                                            <div className="flex gap-2">
+                                                {r.rideStatus === 'pending' && (
+                                                    <button
+                                                        onClick={() => setAssignRideId(r._id)}
+                                                        className="px-3 py-1.5 rounded-lg text-xs font-bold bg-green-50 text-green-700 border border-green-200 hover:bg-green-100"
+                                                    >
+                                                        Assign Driver
+                                                    </button>
+                                                )}
+                                                <button
+                                                    onClick={() => handleDeleteRide(r._id)}
+                                                    className="px-3 py-1.5 rounded-lg text-xs font-bold bg-red-50 text-red-600 border border-red-200 hover:bg-red-100"
+                                                >
+                                                    Delete
+                                                </button>
+                                            </div>
+                                        </td>
+                                    </tr>
+                                )) : (
+                                    <tr>
+                                        <td colSpan="6" className="text-center py-10 text-gray-400">No {activeTab} orders.</td>
+                                    </tr>
+                                )}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+                )}
+
                 {/* Live Activity Log */}
                 {activeTab === 'activity' && (
                 <div className="bg-gray-900 text-white p-6 rounded-3xl shadow-sm mb-8">
@@ -558,6 +605,41 @@ const AdminDashboard = () => {
                                     <p className="font-semibold text-gray-700">⭐ {selectedDriver.driver?.rating ?? 'N/A'}</p>
                                 </div>
                             </div>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* ══════════════════════════════════
+                ASSIGN DRIVER MODAL
+            ══════════════════════════════════ */}
+            {assignRideId && (
+                <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4">
+                    <div className="bg-white rounded-3xl w-full max-w-md shadow-2xl overflow-hidden">
+                        <div className="bg-gray-900 p-5 flex justify-between items-center text-white">
+                            <h2 className="text-xl font-bold">Assign Driver</h2>
+                            <button onClick={() => { setAssignRideId(null); setAssignDriverId(''); }} className="text-gray-400 hover:text-white text-2xl font-light">✕</button>
+                        </div>
+                        <div className="p-6">
+                            <p className="text-sm text-gray-500 mb-4">Select an online driver to dispatch for this order.</p>
+                            <select 
+                                value={assignDriverId} 
+                                onChange={e => setAssignDriverId(e.target.value)}
+                                className="w-full p-4 border border-gray-200 rounded-xl bg-gray-50 font-semibold focus:border-black focus:ring-2 focus:ring-black/5 outline-none mb-6"
+                            >
+                                <option value="">-- Choose a Driver --</option>
+                                {driversList.filter(d => d.isOnline).map(d => (
+                                    <option key={d._id} value={d._id}>
+                                        {d.userId?.name} ({d.vehicleType} - {d.vehicleNumber})
+                                    </option>
+                                ))}
+                            </select>
+                            <button 
+                                onClick={handleAssignDriver}
+                                className="w-full bg-green-500 hover:bg-green-600 text-white font-extrabold py-3 rounded-xl transition shadow-md"
+                            >
+                                Dispatch Driver
+                            </button>
                         </div>
                     </div>
                 </div>
