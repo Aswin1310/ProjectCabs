@@ -68,7 +68,6 @@ const PassengerDashboard = () => {
         const pickupLoc = locations.find(l => l.name === pickup);
         const destLoc = locations.find(l => l.name === destination);
 
-        // For Rentals, Destination is replaced by Selected Package text
         const finalDestination = activeTab === 'rentals' ? `Rental: ${rentalPackage}` : destination;
         const finalDestCoords = activeTab === 'rentals' 
             ? (pickupLoc ? pickupLoc.coordinates : [76.9558, 11.0168])
@@ -86,26 +85,65 @@ const PassengerDashboard = () => {
                  cabType
              });
 
+             // If backend says no driver found, show error instantly — no socket needed
+             if (!response.data.driverFound) {
+                 alert('No drivers are currently available. Please try again shortly.');
+                 setBookingPhase('search');
+                 return;
+             }
+
+             const rideId = response.data._id;
              const storedUser = JSON.parse(localStorage.getItem('user') || '{}');
              const socket = io('http://localhost:5000', {
                  auth: { token: user?.token || storedUser?.token }
              });
 
-             socket.emit('requestRide', response.data);
+             socket.on('connect', () => {
+                 console.log('Passenger socket connected for ride:', rideId);
+                 socket.emit('joinRideRoom', { rideId });
+             });
 
-              socket.on('rideAccepted', (data) => {
-                  socket.close();
-                  navigate(`/ride/${data.rideId}`);
-              });
+             socket.on('rideAccepted', (data) => {
+                 clearInterval(pollTimer);
+                 socket.close();
+                 navigate(`/ride/${data.rideId}`);
+             });
 
-              socket.on('noDriversAvailable', (data) => {
-                  alert(data.message || "No Drivers available matching this schedule nearby.");
-                  setBookingPhase('search');
-                  socket.close();
-              });
+             socket.on('noDriversAvailable', (data) => {
+                 clearInterval(pollTimer);
+                 alert(data.message || 'No Drivers available matching this schedule nearby.');
+                 setBookingPhase('search');
+                 socket.close();
+             });
+
+             // Polling fallback: if socket event is missed, check DB every 3 sec
+             const pollTimer = setInterval(async () => {
+                 try {
+                     const rideRes = await api.get(`/rides/${rideId}`);
+                     if (rideRes.data.rideStatus === 'accepted') {
+                         clearInterval(pollTimer);
+                         socket.close();
+                         navigate(`/ride/${rideId}`);
+                     } else if (rideRes.data.rideStatus === 'cancelled') {
+                         clearInterval(pollTimer);
+                         socket.close();
+                         alert('Ride was cancelled. Please try again.');
+                         setBookingPhase('search');
+                     }
+                 } catch (_) {}
+             }, 3000);
+
+             // Timeout after 90 seconds
+             setTimeout(() => {
+                 clearInterval(pollTimer);
+                 if (socket.connected) socket.close();
+                 setBookingPhase('search');
+                 alert('No driver accepted the ride in time. Please try again.');
+             }, 90000);
+
         } catch (error) {
-             console.error("Booking failed:", error);
-             alert("Failed to book ride");
+             console.error('Booking failed:', error);
+             alert('Failed to book ride');
              setBookingPhase('search');
         }
     };

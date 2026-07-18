@@ -18,34 +18,51 @@ export const createRide = async (req, res) => {
     }).select('driverId');
     const busyDriverIds = busyRides.map(r => r.driverId).filter(Boolean);
 
-    // Find closest online driver who matches the desired cabType and is not busy
-    let nearestDriver = await Driver.findOne({
-      isOnline: true,
-      vehicleType: cabType,
-      _id: { $nin: busyDriverIds },
-      currentLocation: {
-        $near: {
-          $geometry: {
-            type: 'Point',
-            coordinates: pickupCoordinates
-          }
-        }
-      }
-    });
+    let nearestDriver = null;
 
-    // Fallback: search for any closest online driver who is not busy
-    if (!nearestDriver) {
+    // 1. Try geo search with matching cabType
+    try {
       nearestDriver = await Driver.findOne({
         isOnline: true,
+        vehicleType: cabType,
         _id: { $nin: busyDriverIds },
         currentLocation: {
           $near: {
-            $geometry: {
-              type: 'Point',
-              coordinates: pickupCoordinates
-            }
+            $geometry: { type: 'Point', coordinates: pickupCoordinates }
           }
         }
+      });
+    } catch (_) {}
+
+    // 2. Fallback: any online matching cabType (no geo requirement)
+    if (!nearestDriver) {
+      nearestDriver = await Driver.findOne({
+        isOnline: true,
+        vehicleType: cabType,
+        _id: { $nin: busyDriverIds }
+      });
+    }
+
+    // 3. Fallback: any online driver via geo regardless of cab type
+    if (!nearestDriver) {
+      try {
+        nearestDriver = await Driver.findOne({
+          isOnline: true,
+          _id: { $nin: busyDriverIds },
+          currentLocation: {
+            $near: {
+              $geometry: { type: 'Point', coordinates: pickupCoordinates }
+            }
+          }
+        });
+      } catch (_) {}
+    }
+
+    // 4. Last resort: any online driver at all
+    if (!nearestDriver) {
+      nearestDriver = await Driver.findOne({
+        isOnline: true,
+        _id: { $nin: busyDriverIds }
       });
     }
 
@@ -63,15 +80,32 @@ export const createRide = async (req, res) => {
       rideStatus: 'pending',
     });
 
-    // Notify the admin of a new ride creation
+    // Notify the driver directly via socket (most reliable — no client-side timing issue)
     try {
       const io = getIO();
       io.emit('adminRideUpdate', { message: 'New ride created', rideId: ride._id });
+
+      if (nearestDriver) {
+        const populatedRide = await Ride.findById(ride._id).populate('passengerId', 'name phone');
+        const driverUserId = nearestDriver.userId.toString();
+        const driverSocketId = activeDrivers.get(driverUserId);
+        if (driverSocketId) {
+          io.to(driverSocketId).emit('newRide', populatedRide);
+          console.log(`📨 Ride ${ride._id} dispatched directly → driver ${driverUserId}`);
+        } else {
+          console.log(`Driver ${driverUserId} assigned in DB but not socket-connected yet.`);
+        }
+      }
     } catch (socketErr) {
-      console.error("Socket emit failed in createRide:", socketErr.message);
+      console.error('Socket emit failed in createRide:', socketErr.message);
     }
 
-    res.status(201).json(ride);
+    // Return driverFound flag so the passenger knows immediately if no driver exists
+    res.status(201).json({
+      ...ride.toObject(),
+      driverFound: !!nearestDriver,
+      driverUserId: nearestDriver?.userId?.toString() || null,
+    });
   } catch (error) {
     console.error(error);
     res.status(500).json({ message: 'Server Error' });

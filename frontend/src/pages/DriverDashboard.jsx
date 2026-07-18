@@ -34,6 +34,7 @@ const DriverDashboard = () => {
     const [countdown, setCountdown]       = useState(30);
     const countdownRef                    = useRef(null);
     const geoWatchRef                     = useRef(null);
+    const isOnlineRef                     = useRef(false); // mirrors isOnline for socket closures
 
     /* ── Fetch driver profile, Rides & Locations ─────────────── */
     useEffect(() => {
@@ -46,7 +47,9 @@ const DriverDashboard = () => {
                 ]);
                 
                 if (profileRes?.data) {
-                    setIsOnline(profileRes.data.isOnline ?? false);
+                    const online = profileRes.data.isOnline ?? false;
+                    setIsOnline(online);
+                    isOnlineRef.current = online;
                 }
                 if (ridesRes?.data) {
                     setRides(ridesRes.data);
@@ -119,7 +122,16 @@ const DriverDashboard = () => {
         });
         setSocket(sock);
 
-        sock.on('connect', () => console.log('Driver socket connected:', sock.id));
+        sock.on('connect', () => {
+            console.log('Driver socket connected:', sock.id);
+            // On reconnect (e.g. page refresh or brief disconnect), re-register
+            // this socket with the backend if the driver was already online.
+            // Uses isOnlineRef to avoid reading a stale closure variable.
+            if (isOnlineRef.current) {
+                sock.emit('driverOnline');
+                console.log('♻️ Re-emitted driverOnline on reconnect (was already online).');
+            }
+        });
 
         /* New ride assigned to this driver */
         sock.on('newRide', (rideData) => {
@@ -209,12 +221,13 @@ const DriverDashboard = () => {
         if (socket?.connected) socket.emit('locationUpdate', { longitude, latitude });
     };
 
-    /* ── Toggle online / offline ──────────────────────── */
+    /* ── Toggle online / offline ────────────────── */
     const toggleStatus = async () => {
         try {
             const next = !isOnline;
             await api.put('/driver/status', { isOnline: next });
             setIsOnline(next);
+            isOnlineRef.current = next; // keep ref in sync for socket closures
 
             if (socket) socket.emit(next ? 'driverOnline' : 'driverOffline');
 

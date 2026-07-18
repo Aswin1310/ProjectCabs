@@ -21,6 +21,11 @@ export const activePassengers = new Map();  // userId  -> socketId
 export const activeDrivers    = new Map();  // userId  -> socketId
 export const activeAdmins     = new Map();  // userId  -> socketId
 
+// Grace-period timers: if a driver disconnects we wait before marking offline
+// This prevents page-refresh / brief network blip from wiping driver status
+const disconnectTimers = new Map(); // userId -> NodeJS.Timeout
+const DRIVER_OFFLINE_GRACE_MS = 30_000; // 30 seconds
+
 /* ============================================================
    Helper: broadcast to all admins
    ============================================================ */
@@ -70,7 +75,7 @@ export const configureSockets = (server) => {
     /* ----------------------------------------------------------
        CONNECTION
        ---------------------------------------------------------- */
-    io.on('connection', (socket) => {
+    io.on('connection', async (socket) => {
         const uid = socket.user._id.toString();
         const role = socket.user.role;
 
@@ -80,7 +85,27 @@ export const configureSockets = (server) => {
         if (role === 'passenger') {
             activePassengers.set(uid, socket.id);
         } else if (role === 'driver') {
+            // Cancel any pending offline grace-period timer for this driver
+            if (disconnectTimers.has(uid)) {
+                clearTimeout(disconnectTimers.get(uid));
+                disconnectTimers.delete(uid);
+                console.log(`⏳ Grace-period cancelled — driver ${socket.user.name} reconnected in time.`);
+            }
+
             activeDrivers.set(uid, socket.id);
+
+            // Auto-restore: if this driver was marked online in the DB (e.g. they
+            // refreshed the page), re-register them in Redis so they can receive rides
+            // without having to manually toggle the status button again.
+            try {
+                const dbDriver = await Driver.findOne({ userId: uid }).select('isOnline');
+                if (dbDriver?.isOnline) {
+                    await setDriverOnlineStatus(uid, true);
+                    console.log(`♻️  Driver ${socket.user.name} was already online in DB — Redis status restored.`);
+                }
+            } catch (err) {
+                console.error('Auto-restore driver online status error:', err.message);
+            }
         } else if (role === 'admin') {
             activeAdmins.set(uid, socket.id);
             // Send current online driver count immediately
@@ -405,21 +430,45 @@ export const configureSockets = (server) => {
            ====================================================== */
 
         socket.on('disconnect', async () => {
-            console.log(`❌ Disconnected: ${socket.user.name} (${role})`);
+            console.log(`❌ Disconnected: ${socket.user.name} (${role}) [${socket.id}]`);
 
             if (role === 'passenger') {
                 if (activePassengers.get(uid) === socket.id) {
                     activePassengers.delete(uid);
                 }
             } else if (role === 'driver') {
-                if (activeDrivers.get(uid) === socket.id) {
-                    activeDrivers.delete(uid);
-                    await setDriverOnlineStatus(uid, false);
-                    await removeDriverFromCache(uid);
-                    await Driver.findOneAndUpdate({ userId: uid }, { isOnline: false });
-                    broadcastToAdmins('adminOnlineStats', { onlineDrivers: activeDrivers.size, onlinePassengers: activePassengers.size });
-                    broadcastToAdmins('adminDriverStatus', { driverId: uid, driverName: socket.user.name, isOnline: false });
-                }
+                // Only act if this socket was the registered one for this driver
+                if (activeDrivers.get(uid) !== socket.id) return;
+
+                // Remove from in-memory map immediately so new booking requests
+                // don't try to route to a dead socket.
+                activeDrivers.delete(uid);
+
+                // Use a grace period before committing "offline" to DB/Redis.
+                // This handles page refreshes and brief network blips gracefully.
+                const timer = setTimeout(async () => {
+                    disconnectTimers.delete(uid);
+                    // If the driver reconnected within the grace window,
+                    // activeDrivers will have their uid again — don't mark offline.
+                    if (activeDrivers.has(uid)) return;
+
+                    try {
+                        await setDriverOnlineStatus(uid, false);
+                        await removeDriverFromCache(uid);
+                        await Driver.findOneAndUpdate({ userId: uid }, { isOnline: false });
+                        console.log(`🔴 Driver ${socket.user.name} marked offline after grace period.`);
+                        broadcastToAdmins('adminOnlineStats', { onlineDrivers: activeDrivers.size, onlinePassengers: activePassengers.size });
+                        broadcastToAdmins('adminDriverStatus', { driverId: uid, driverName: socket.user.name, isOnline: false });
+                    } catch (err) {
+                        console.error('Grace-period offline update error:', err.message);
+                    }
+                }, DRIVER_OFFLINE_GRACE_MS);
+
+                disconnectTimers.set(uid, timer);
+                console.log(`⏳ Driver ${socket.user.name} disconnected — grace period started (${DRIVER_OFFLINE_GRACE_MS / 1000}s).`);
+
+                // Immediately update admin UI count (optimistic)
+                broadcastToAdmins('adminOnlineStats', { onlineDrivers: activeDrivers.size, onlinePassengers: activePassengers.size });
             } else if (role === 'admin') {
                 if (activeAdmins.get(uid) === socket.id) {
                     activeAdmins.delete(uid);
