@@ -157,6 +157,7 @@ export const getCachedETA = async (rideId) => {
 export const storeRideOTP = async (rideId, otp) => {
     try {
         await redisClient.setEx(`otp:${rideId}`, 600, otp.toString());
+        await redisClient.del(`otp_attempts:${rideId}`);
     } catch (error) {
         console.error('Redis OTP store error:', error);
     }
@@ -172,12 +173,45 @@ export const verifyRideOTP = async (rideId, otp) => {
     }
 };
 
+/** Get OTP for a ride (for passenger UI reconnects) */
+export const getRideOTPRaw = async (rideId) => {
+    try {
+        return await redisClient.get(`otp:${rideId}`);
+    } catch (error) {
+        return null;
+    }
+};
+
 /** Delete OTP after it's used */
 export const deleteRideOTP = async (rideId) => {
     try {
         await redisClient.del(`otp:${rideId}`);
+        await redisClient.del(`otp_attempts:${rideId}`);
     } catch (error) {
         console.error('Redis OTP delete error:', error);
+    }
+};
+
+/** Increment OTP verification attempts */
+export const incrementRideOTPAttempts = async (rideId) => {
+    try {
+        const attempts = await redisClient.incr(`otp_attempts:${rideId}`);
+        if (attempts === 1) {
+            await redisClient.expire(`otp_attempts:${rideId}`, 600); // 10 min
+        }
+        return attempts;
+    } catch (error) {
+        return 0;
+    }
+};
+
+/** Get OTP verification attempts */
+export const getRideOTPAttempts = async (rideId) => {
+    try {
+        const attempts = await redisClient.get(`otp_attempts:${rideId}`);
+        return attempts ? parseInt(attempts) : 0;
+    } catch (error) {
+        return 0;
     }
 };
 

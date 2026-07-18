@@ -1,5 +1,5 @@
 import express from 'express';
-import { getDashboardStats, getUsers, getDrivers, getAllRides, getDriverStats } from '../controllers/adminController.js';
+import { getDashboardStats, getUsers, getDrivers, getAllRides, getDriverStats, deleteRide } from '../controllers/adminController.js';
 import { protect, authorize } from '../middleware/authMiddleware.js';
 
 const router = express.Router();
@@ -11,5 +11,6 @@ router.get('/users', getUsers);
 router.get('/drivers', getDrivers);
 router.get('/drivers/:id/stats', getDriverStats);
 router.get('/rides', getAllRides);
+router.delete('/rides/:id', deleteRide);
 
 export default router;

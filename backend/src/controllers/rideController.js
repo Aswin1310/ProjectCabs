@@ -2,7 +2,7 @@ import { Ride } from '../models/Ride.js';
 import { Driver } from '../models/Driver.js';
 import { Payment } from '../models/Payment.js';
 import { activePassengers, activeDrivers, getIO } from '../sockets/index.js';
-import { cacheRideState, deleteCachedRide } from '../redis/index.js';
+import { cacheRideState, deleteCachedRide, verifyRideOTP, getRideOTPAttempts, incrementRideOTPAttempts, deleteRideOTP, getRideOTPRaw } from '../redis/index.js';
 
 // @desc    Create a new ride request
 // @route   POST /api/rides
@@ -16,7 +16,7 @@ export const createRide = async (req, res) => {
       rideStatus: { $in: ['accepted', 'started'] },
       driverId: { $ne: null }
     }).select('driverId');
-    const busyDriverIds = busyRides.map(r => r.driverId ? r.driverId.toString() : null).filter(Boolean);
+    const busyDriverIds = busyRides.map(r => r.driverId).filter(Boolean);
 
     // Find closest online driver who matches the desired cabType and is not busy
     let nearestDriver = await Driver.findOne({
@@ -114,7 +114,17 @@ export const getRideById = async (req, res) => {
       return res.status(404).json({ message: 'Ride not found' });
     }
 
-    res.json(ride);
+    let rideObj = ride.toObject();
+
+    // If passenger is checking, retrieve active OTP in case socket missed it
+    if (req.user.role === 'passenger' && ride.rideStatus === 'accepted') {
+      const activeOtp = await getRideOTPRaw(ride._id.toString());
+      if (activeOtp) {
+        rideObj.activeOtp = activeOtp;
+      }
+    }
+
+    res.json(rideObj);
   } catch (error) {
     console.error(error);
     res.status(500).json({ message: 'Server Error' });
@@ -171,6 +181,35 @@ export const startRide = async (req, res) => {
     if (ride.rideStatus !== 'accepted') {
       return res.status(400).json({ message: 'Ride must be accepted first' });
     }
+
+    const { otp } = req.body;
+    if (!otp) return res.status(400).json({ message: 'OTP is required to start the ride' });
+
+    const isValid = await verifyRideOTP(ride._id.toString(), otp);
+    
+    if (!isValid) {
+        const attempts = await incrementRideOTPAttempts(ride._id.toString());
+        if (attempts >= 3) {
+            // Cancel ride
+            ride.rideStatus = 'cancelled';
+            await ride.save();
+            await deleteRideOTP(ride._id.toString());
+            
+            try { await deleteCachedRide(ride._id.toString()); } catch (_) {}
+            try {
+                const io = getIO();
+                const passengerSocketId = activePassengers.get(ride.passengerId.toString());
+                if (passengerSocketId) io.to(passengerSocketId).emit('rideCancelled', { rideId: ride._id, reason: 'Ride cancelled due to too many failed OTP attempts.' });
+                io.emit('adminRideUpdate', { event: 'ride_cancelled', rideId: ride._id });
+            } catch (socketErr) {}
+            
+            return res.status(400).json({ message: 'Ride cancelled due to too many failed OTP attempts', cancelled: true });
+        }
+        return res.status(400).json({ message: `Invalid OTP. You have ${3 - attempts} attempt(s) remaining.` });
+    }
+
+    // OTP is valid
+    await deleteRideOTP(ride._id.toString());
 
     ride.rideStatus = 'started';
     await ride.save();

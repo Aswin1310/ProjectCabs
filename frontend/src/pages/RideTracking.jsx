@@ -38,6 +38,11 @@ const RideTracking = () => {
     const [unread, setUnread]         = useState(0);
     const msgEndRef = useRef(null);
 
+    /* OTP */
+    const [passengerOTP, setPassengerOTP] = useState(null);
+    const [driverOTPInput, setDriverOTPInput] = useState('');
+    const [arrived, setArrived] = useState(false);
+
     /* Toast */
     const [toast, setToast]           = useState(null);
 
@@ -62,6 +67,9 @@ const RideTracking = () => {
             try {
                 const res = await api.get(`/rides/${id}`);
                 setRide(res.data);
+                if (res.data.activeOtp) {
+                    setPassengerOTP(res.data.activeOtp);
+                }
                 setLoading(false);
             } catch (err) {
                 console.error('Failed to fetch ride:', err);
@@ -112,7 +120,16 @@ const RideTracking = () => {
         /* ── Driver arrived ── */
         sock.on('driverArrived', (data) => {
             if (data.rideId === id || data.rideId?.toString() === id) {
+                if (data.otp) setPassengerOTP(data.otp);
                 showToast('🚗 Your driver has arrived!', 'success');
+            }
+        });
+
+        /* ── OTP Resent ── */
+        sock.on('otpResent', (data) => {
+            if (data.rideId === id || data.rideId?.toString() === id) {
+                if (data.otp) setPassengerOTP(data.otp);
+                showToast(data.message || 'New OTP received.', 'info');
             }
         });
 
@@ -179,7 +196,8 @@ const RideTracking = () => {
     /* ── REST action handler ─────────────────────────────── */
     const handleAction = async (action) => {
         try {
-            await api.put(`/rides/${id}/${action}`);
+            const reqData = action === 'start' ? { otp: driverOTPInput } : {};
+            await api.put(`/rides/${id}/${action}`, reqData);
             setRide(prev => ({ ...prev, rideStatus: action === 'cancel' ? 'cancelled' : action === 'start' ? 'started' : 'completed' }));
 
             if (action === 'complete') {
@@ -188,7 +206,11 @@ const RideTracking = () => {
             }
         } catch (err) {
             console.error(`Failed to ${action} ride:`, err);
-            showToast(`Failed to ${action} ride`, 'error');
+            const msg = err.response?.data?.message || `Failed to ${action} ride`;
+            showToast(msg, 'error');
+            if (err.response?.data?.cancelled) {
+                setTimeout(() => window.location.reload(), 2000); // Reload to show cancelled status
+            }
         }
     };
 
@@ -197,7 +219,17 @@ const RideTracking = () => {
         if (socket) {
             const passengerId = ride?.passengerId?._id || ride?.passengerId;
             socket.emit('driverArrived', { rideId: id, passengerId: passengerId?.toString() });
+            setArrived(true);
             showToast('Passenger notified that you have arrived!', 'success');
+        }
+    };
+
+    /* ── Resend OTP ──────────────────────────────────────── */
+    const handleResendOTP = () => {
+        if (socket) {
+            const passengerId = ride?.passengerId?._id || ride?.passengerId;
+            socket.emit('resendOTP', { rideId: id, passengerId: passengerId?.toString() });
+            showToast('Requested new OTP.', 'info');
         }
     };
 
@@ -298,14 +330,31 @@ const RideTracking = () => {
                 {/* ── DRIVER ACTIONS ── */}
                 {isDriver && (
                     <div className="mt-auto space-y-3">
-                        {ride.rideStatus === 'accepted' && (
+                        {ride.rideStatus === 'accepted' && !arrived && (
+                            <button onClick={handleArrived}
+                                className="w-full py-3 bg-yellow-400 text-gray-900 font-bold rounded-xl hover:bg-yellow-500 transition shadow-md">
+                                📍 I've Arrived at Pickup
+                            </button>
+                        )}
+                        {ride.rideStatus === 'accepted' && arrived && (
                             <>
-                                <button onClick={handleArrived}
-                                    className="w-full py-3 bg-yellow-400 text-gray-900 font-bold rounded-xl hover:bg-yellow-500 transition shadow-md">
-                                    📍 I've Arrived at Pickup
-                                </button>
+                                <div className="text-center bg-gray-50 p-4 rounded-xl border border-gray-200">
+                                    <p className="text-sm text-gray-500 font-bold mb-2">Enter OTP from Passenger</p>
+                                    <input 
+                                        type="text" 
+                                        maxLength="4"
+                                        className="text-center w-full max-w-[200px] mx-auto p-3 text-2xl font-black tracking-[0.5em] border-2 border-gray-300 rounded-lg outline-none focus:border-green-500" 
+                                        placeholder="0000"
+                                        value={driverOTPInput}
+                                        onChange={e => setDriverOTPInput(e.target.value.replace(/\D/g, ''))}
+                                    />
+                                    <button onClick={handleResendOTP} className="text-blue-500 text-sm font-bold mt-2 hover:underline block mx-auto">
+                                        Resend OTP
+                                    </button>
+                                </div>
                                 <button onClick={() => handleAction('start')}
-                                    className="w-full py-4 bg-green-500 text-white font-bold text-lg rounded-xl shadow-lg hover:bg-green-600 transition">
+                                    disabled={driverOTPInput.length !== 4}
+                                    className={`w-full py-4 text-white font-bold text-lg rounded-xl shadow-lg transition ${driverOTPInput.length === 4 ? 'bg-green-500 hover:bg-green-600' : 'bg-green-300 cursor-not-allowed'}`}>
                                     🚀 Start Trip
                                 </button>
                             </>
@@ -325,7 +374,15 @@ const RideTracking = () => {
                         <p className="text-2xl mb-2">🚗</p>
                         <h4 className="font-bold text-lg text-gray-800">Driver is on the way!</h4>
                         <p className="text-gray-500 text-sm mb-3">Stay near the pickup point.</p>
-                        <button onClick={() => handleAction('cancel')} className="text-red-500 font-bold hover:underline text-sm">
+                        
+                        {passengerOTP && (
+                            <div className="mt-4 p-4 bg-white rounded-xl shadow-sm border border-gray-200">
+                                <p className="text-xs text-gray-500 font-bold uppercase mb-1">Share this OTP with driver</p>
+                                <p className="text-4xl font-black text-blue-600 tracking-widest">{passengerOTP}</p>
+                            </div>
+                        )}
+                        
+                        <button onClick={() => handleAction('cancel')} className="text-red-500 font-bold hover:underline text-sm mt-4 inline-block">
                             Cancel Ride
                         </button>
                     </div>

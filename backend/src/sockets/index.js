@@ -9,8 +9,9 @@ import {
     setDriverOnlineStatus,
     cacheRideState,
     getCachedRide,
-    deleteCachedRide,
     cacheRideETA,
+    storeRideOTP,
+    deleteRideOTP
 } from '../redis/index.js';
 
 let io;
@@ -180,14 +181,33 @@ export const configureSockets = (server) => {
             try {
                 const { rideId, passengerId } = data;
 
-                const passengerSocketId = activePassengers.get(passengerId);
-                if (passengerSocketId) {
-                    io.to(passengerSocketId).emit('driverArrived', { rideId, message: 'Your driver has arrived! Please come to the pickup point.' });
-                }
+                const otp = Math.floor(1000 + Math.random() * 9000).toString();
+                await storeRideOTP(rideId, otp);
+
+                const room = `ride:${rideId}`;
+                // Broadcast to room instead of single socket (safeguard against socket desync)
+                io.to(room).emit('driverArrived', { rideId, otp, message: 'Your driver has arrived! Please come to the pickup point.' });
 
                 broadcastToAdmins('adminRideUpdate', { event: 'driver_arrived', rideId });
             } catch (err) {
                 console.error('driverArrived error:', err);
+            }
+        });
+
+        /** Resend OTP
+         *  Payload: { rideId, passengerId }
+         */
+        socket.on('resendOTP', async (data) => {
+            try {
+                const { rideId, passengerId } = data;
+                
+                const otp = Math.floor(1000 + Math.random() * 9000).toString();
+                await storeRideOTP(rideId, otp);
+                
+                const room = `ride:${rideId}`;
+                io.to(room).emit('otpResent', { rideId, otp, message: 'Driver sent a new OTP.' });
+            } catch (err) {
+                console.error('resendOTP error:', err);
             }
         });
 
@@ -287,10 +307,15 @@ export const configureSockets = (server) => {
                     if (driver) {
                         const driverUserId = driver.userId.toString();
                         const driverSocketId = activeDrivers.get(driverUserId);
+                        
+                        console.log(`Searching for socket for Driver ${driverUserId}. Active drivers:`, Array.from(activeDrivers.keys()));
+                        
                         if (driverSocketId) {
                             io.to(driverSocketId).emit('newRide', ride);
                             console.log(`📨 Ride ${rideId} dispatched → driver ${driverUserId}`);
                             return;
+                        } else {
+                            console.log(`Driver ${driverUserId} is assigned in DB but not connected to sockets! Falling back.`);
                         }
                     }
                 }
