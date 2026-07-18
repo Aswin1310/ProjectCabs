@@ -21,6 +21,7 @@ const DriverDashboard = () => {
     const [radarActive, setRadarActive]   = useState(false); // only true after manual toggle click
     const [rides, setRides]               = useState([]);
     const [selectedDate, setSelectedDate] = useState(new Date().toISOString().split('T')[0]);
+    const [mainTab, setMainTab] = useState('overview');
 
     // Stats states
     const [stats, setStats] = useState({
@@ -311,7 +312,25 @@ const DriverDashboard = () => {
                     </div>
                 </div>
 
-                {/* Stats grid */}
+                {/* Tabs NAVIGATION */}
+                <div className="flex flex-wrap gap-3 mb-8 border-b border-gray-200 pb-5">
+                    {['overview', 'history'].map(tab => {
+                        const tabNames = { overview: 'Overview', history: 'Earnings & History' };
+                        return (
+                            <button
+                                key={tab}
+                                onClick={() => setMainTab(tab)}
+                                className={`px-5 py-2.5 rounded-xl font-bold text-sm transition-all outline-none ${mainTab === tab ? 'bg-gray-900 text-white shadow-md' : 'bg-white text-gray-600 hover:bg-gray-100 border border-gray-200'}`}
+                            >
+                                {tabNames[tab]}
+                            </button>
+                        );
+                    })}
+                </div>
+
+                {mainTab === 'overview' && (
+                    <div className="space-y-6">
+                        {/* Stats grid */}
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                     {[
                         { label: "Today's",        val1: `Earned: $${stats.today.earnings}`, val2: `Trips: ${stats.today.trips}`, icon: '⚡', color: 'text-green-600' },
@@ -329,31 +348,7 @@ const DriverDashboard = () => {
                         </div>
                     ))}
                 </div>
-                
-                {/* Custom Date Stats */}
-                <div className="bg-white rounded-2xl p-6 shadow-sm border border-gray-100 flex flex-col md:flex-row items-center gap-6">
-                    <div className="flex-1 w-full">
-                       <h3 className="text-lg font-bold">Historical Statistics</h3>
-                       <p className="text-gray-500 text-sm">Select any date to view your exact earnings and trips for that day</p>
-                    </div>
-                    <div className="flex items-center gap-4 bg-gray-50 p-3 rounded-xl border border-gray-100 shadow-inner">
-                        <input 
-                            type="date" 
-                            name="stat-date"
-                            value={selectedDate}
-                            onChange={handleDateChange}
-                            className="bg-transparent font-bold text-gray-700 outline-none"
-                        />
-                    </div>
-                    <div className="text-right min-w-[120px]">
-                        <p className="text-xs text-gray-400 font-bold uppercase">Trips that Day</p>
-                        <p className="text-xl font-black text-gray-800">{stats.selected.trips}</p>
-                    </div>
-                    <div className="text-right min-w-[120px]">
-                        <p className="text-xs text-gray-400 font-bold uppercase">Earned that Day</p>
-                        <p className="text-xl font-black text-green-600">${stats.selected.earnings}</p>
-                    </div>
-                </div>
+                {/* Custom Date Stats Moved to History Tab */}
 
                 {/* ── Location Pin (shows when online) ── */}
                 {isOnline && (
@@ -399,9 +394,92 @@ const DriverDashboard = () => {
                             <p className="text-gray-400 text-sm mt-1">Go online to receive ride requests.</p>
                         </>
                     )}
-                </div>
+                    </div>
                 ) : null}
+                    </div>
+                )}
 
+                {mainTab === 'history' && (
+                    <div className="space-y-6">
+                        {/* Custom Date Stats */}
+                        <div className="bg-white rounded-2xl p-6 shadow-sm border border-gray-100 flex flex-col md:flex-row items-center gap-4 md:gap-6">
+                            <div className="flex-1 w-full text-center md:text-left">
+                               <h3 className="text-lg font-bold">Historical Statistics by Date</h3>
+                               <p className="text-gray-500 text-sm">Select any date to view your exact earnings and trips for that day</p>
+                            </div>
+                            <div className="flex items-center gap-4 bg-gray-50 p-3 rounded-xl border border-gray-100 shadow-inner w-full md:w-auto overflow-hidden">
+                                <input 
+                                    type="date" 
+                                    name="stat-date"
+                                    value={selectedDate}
+                                    onChange={handleDateChange}
+                                    className="bg-transparent font-bold text-gray-700 outline-none w-full"
+                                />
+                            </div>
+                            <div className="flex w-full md:w-auto justify-around md:justify-end gap-6 mt-4 md:mt-0">
+                                <div className="text-center md:text-right min-w-[80px]">
+                                    <p className="text-xs text-gray-400 font-bold uppercase">Trips</p>
+                                    <p className="text-2xl font-black text-gray-800">{stats.selected.trips}</p>
+                                </div>
+                                <div className="text-center md:text-right min-w-[80px]">
+                                    <p className="text-xs text-gray-400 font-bold uppercase">Earnings</p>
+                                    <p className="text-2xl font-black text-green-600">${stats.selected.earnings}</p>
+                                </div>
+                            </div>
+                        </div>
+
+                        {/* Recent Rides Table */}
+                        <div className="bg-white rounded-3xl shadow-sm border border-gray-100 overflow-hidden">
+                            <div className="p-6 border-b border-gray-100 bg-gray-50">
+                                <h2 className="text-xl font-bold">Your Managed Rides</h2>
+                            </div>
+                            <div className="overflow-x-auto">
+                                <table className="min-w-full divide-y divide-gray-100">
+                                    <thead className="bg-white">
+                                        <tr>
+                                            {['Date', 'Route', 'Passenger', 'Fare', 'Status'].map(h => (
+                                                <th key={h} className="px-6 py-4 text-left text-xs font-bold text-gray-500 uppercase tracking-wider">{h}</th>
+                                            ))}
+                                        </tr>
+                                    </thead>
+                                    <tbody className="bg-white divide-y divide-gray-100">
+                                        {rides.length > 0 ? rides.map(r => (
+                                            <tr key={r._id} className="hover:bg-gray-50 transition cursor-pointer" onClick={() => navigate(`/ride/${r._id}`)}>
+                                                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-600 font-medium">
+                                                    {new Date(r.createdAt).toLocaleDateString()}
+                                                </td>
+                                                <td className="px-6 py-4 text-sm max-w-[200px]">
+                                                    <div className="font-bold text-gray-800 truncate">{r.pickup} → {r.destination}</div>
+                                                </td>
+                                                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-600">
+                                                    {r.passengerId?.name || 'User'}
+                                                </td>
+                                                <td className="px-6 py-4 whitespace-nowrap text-sm font-bold text-green-600">
+                                                    ${r.fare}
+                                                </td>
+                                                <td className="px-6 py-4 whitespace-nowrap">
+                                                    <span className={`px-3 py-1 inline-flex text-xs leading-5 font-bold rounded-full ${
+                                                        r.rideStatus === 'completed' ? 'bg-green-100 text-green-800' :
+                                                        r.rideStatus === 'cancelled' ? 'bg-red-100 text-red-800' :
+                                                        'bg-yellow-100 text-yellow-800'
+                                                    }`}>
+                                                        {r.rideStatus}
+                                                    </span>
+                                                </td>
+                                            </tr>
+                                        )) : (
+                                            <tr>
+                                                <td colSpan="5" className="px-6 py-10 text-center text-gray-400">
+                                                    No rides found.
+                                                </td>
+                                            </tr>
+                                        )}
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+                )}
             </div>
 
             {/* ════════════════════════════════

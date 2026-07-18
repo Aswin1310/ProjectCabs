@@ -84,7 +84,7 @@ const DriverProfile = () => {
 
       {/* Stats Bar */}
       <div className="bg-white border-b border-stone-100 shadow-sm">
-        <div className="max-w-4xl mx-auto px-6 py-5 grid grid-cols-4 divide-x divide-stone-100">
+        <div className="max-w-4xl mx-auto px-6 py-5 grid grid-cols-2 md:grid-cols-4 gap-y-6 md:gap-y-0 divide-x-0 md:divide-x divide-stone-100">
           {[
             { label: 'Total Trips', value: stats?.allTime?.trips ?? driverData?.totalTrips ?? 0 },
             { label: 'Total Earned', value: `₹${(stats?.allTime?.earnings ?? driverData?.earnings ?? 0).toLocaleString('en-IN')}` },

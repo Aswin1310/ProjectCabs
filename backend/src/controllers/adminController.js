@@ -126,16 +126,14 @@ export const getDriverStats = async (req, res) => {
   }
 };
 
-// @desc    Delete a completed or cancelled ride
+// @desc    Delete a ride
 // @route   DELETE /api/admin/rides/:id
 // @access  Private (Admin)
 export const deleteRide = async (req, res) => {
   try {
     const ride = await Ride.findById(req.params.id);
     if (!ride) return res.status(404).json({ message: 'Ride not found' });
-    if (!['completed', 'cancelled'].includes(ride.rideStatus)) {
-      return res.status(400).json({ message: 'Only completed or cancelled rides can be deleted' });
-    }
+    
     await ride.deleteOne();
     res.json({ message: 'Ride deleted successfully' });
   } catch (error) {

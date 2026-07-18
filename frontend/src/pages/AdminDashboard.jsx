@@ -30,6 +30,9 @@ const AdminDashboard = () => {
     // Pagination
     const [ridePage, setRidePage] = useState(0);
 
+    // Tab state
+    const [activeTab, setActiveTab] = useState('dashboard');
+
     // Driver stats modal
     const [selectedDriver, setSelectedDriver] = useState(null);
     const [driverModalDate, setDriverModalDate] = useState(new Date().toISOString().split('T')[0]);
@@ -166,9 +169,31 @@ const AdminDashboard = () => {
                     </div>
                 </div>
 
+                {/* Tabs NAVIGATION */}
+                <div className="flex flex-wrap gap-3 mb-8 border-b border-gray-200 pb-5">
+                    {['dashboard', 'users', 'drivers', 'rides', 'activity'].map(tab => {
+                        const tabNames = {
+                            dashboard: 'Dashboard',
+                            users: 'User Overview',
+                            drivers: 'Driver Overview',
+                            rides: 'Live Ride Track',
+                            activity: 'Live Activity'
+                        };
+                        return (
+                        <button
+                            key={tab}
+                            onClick={() => setActiveTab(tab)}
+                            className={`px-5 py-2.5 rounded-xl font-bold text-sm transition-all outline-none ${activeTab === tab ? 'bg-gray-900 text-white shadow-md' : 'bg-white text-gray-600 hover:bg-gray-100 border border-gray-200'}`}
+                        >
+                            {tabNames[tab]}
+                        </button>
+                        );
+                    })}
+                </div>
+
                 {/* Stats Grid */}
-                {stats && (
-                    <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4 mb-8">
+                {activeTab === 'dashboard' && stats && (
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-6 gap-4 mb-8">
                         <div className="bg-white p-5 rounded-2xl shadow-sm border border-gray-100 flex flex-col">
                             <span className="text-gray-500 font-bold text-xs uppercase">Total Revenue</span>
                             <h2 className="text-3xl font-black text-green-600 mt-2">${stats.totalEarnings}</h2>
@@ -201,41 +226,48 @@ const AdminDashboard = () => {
                 )}
 
                 {/* Users + Drivers Overview */}
-                <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 mb-8">
-                    <div className="bg-white p-6 rounded-3xl shadow-sm border border-gray-100">
-                        <h2 className="text-2xl font-bold mb-6">Users Overview</h2>
-                        <div className="max-h-80 overflow-y-auto pr-2">
-                            {usersList.length > 0 ? usersList.map(u => (
-                                <div key={u._id} className="p-4 mb-2 bg-gray-50 rounded-xl border border-gray-100 flex justify-between items-center hover:shadow-sm transition">
-                                    <div><p className="font-bold text-gray-800">{u.name}</p><p className="text-sm text-gray-500">{u.email}</p></div>
-                                    <p className="text-sm font-semibold text-gray-600">{u.phone}</p>
-                                </div>
-                            )) : <p className="text-gray-500 text-center py-4">No users found.</p>}
+                {activeTab === 'users' && (
+                    <div className="mb-8">
+                        <div className="bg-white p-6 rounded-3xl shadow-sm border border-gray-100">
+                            <h2 className="text-2xl font-bold mb-6">Users Overview</h2>
+                            <div className="max-h-[600px] overflow-y-auto pr-2">
+                                {usersList.length > 0 ? usersList.map(u => (
+                                    <div key={u._id} className="p-4 mb-2 bg-gray-50 rounded-xl border border-gray-100 flex justify-between items-center hover:shadow-sm transition">
+                                        <div><p className="font-bold text-gray-800">{u.name}</p><p className="text-sm text-gray-500">{u.email}</p></div>
+                                        <p className="text-sm font-semibold text-gray-600">{u.phone}</p>
+                                    </div>
+                                )) : <p className="text-gray-500 text-center py-4">No users found.</p>}
+                            </div>
                         </div>
                     </div>
-                    <div className="bg-white p-6 rounded-3xl shadow-sm border border-gray-100">
-                        <h2 className="text-2xl font-bold mb-6">Drivers Overview</h2>
-                        <p className="text-xs text-gray-400 mb-3">Click a driver name to view their stats</p>
-                        <div className="max-h-80 overflow-y-auto pr-2">
-                            {driversList.length > 0 ? driversList.map(d => (
-                                <div key={d._id} className="p-4 mb-2 bg-gray-50 rounded-xl border border-gray-100 flex justify-between items-center hover:shadow-md transition cursor-pointer"
-                                    onClick={() => openDriverStats(d._id)}>
-                                    <div>
-                                        <p className="font-bold text-gray-800 hover:text-green-600 transition">{d.userId?.name || 'Loading...'}</p>
-                                        <p className="text-sm text-gray-500">{d.vehicleType} &bull; {d.vehicleNumber}</p>
+                )}
+                {activeTab === 'drivers' && (
+                    <div className="mb-8">
+                        <div className="bg-white p-6 rounded-3xl shadow-sm border border-gray-100">
+                            <h2 className="text-2xl font-bold mb-6">Drivers Overview</h2>
+                            <p className="text-xs text-gray-400 mb-3">Click a driver name to view their stats</p>
+                            <div className="max-h-[600px] overflow-y-auto pr-2">
+                                {driversList.length > 0 ? driversList.map(d => (
+                                    <div key={d._id} className="p-4 mb-2 bg-gray-50 rounded-xl border border-gray-100 flex justify-between items-center hover:shadow-md transition cursor-pointer"
+                                        onClick={() => openDriverStats(d._id)}>
+                                        <div>
+                                            <p className="font-bold text-gray-800 hover:text-green-600 transition">{d.userId?.name || 'Loading...'}</p>
+                                            <p className="text-sm text-gray-500">{d.vehicleType} &bull; {d.vehicleNumber}</p>
+                                        </div>
+                                        <div className="text-right">
+                                            <p className={`text-sm font-bold ${d.isOnline ? 'text-green-500' : 'text-gray-400'}`}>{d.isOnline ? '🟢 Online' : '⚫ Offline'}</p>
+                                            <p className="text-xs text-gray-400 mt-1">Tap to view stats →</p>
+                                        </div>
                                     </div>
-                                    <div className="text-right">
-                                        <p className={`text-sm font-bold ${d.isOnline ? 'text-green-500' : 'text-gray-400'}`}>{d.isOnline ? '🟢 Online' : '⚫ Offline'}</p>
-                                        <p className="text-xs text-gray-400 mt-1">Tap to view stats →</p>
-                                    </div>
-                                </div>
-                            )) : <p className="text-gray-500 text-center py-4">No drivers found.</p>}
+                                )) : <p className="text-gray-500 text-center py-4">No drivers found.</p>}
+                            </div>
                         </div>
                     </div>
-                </div>
+                )}
 
                 {/* Locations Management */}
-                <div className="bg-white p-6 rounded-3xl shadow-sm border border-gray-100 mb-8">
+                {activeTab === 'dashboard' && (
+                    <div className="bg-white p-6 rounded-3xl shadow-sm border border-gray-100 mb-8">
                     <h2 className="text-2xl font-bold mb-6">Manage Service Locations</h2>
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
                         <div>
@@ -262,10 +294,13 @@ const AdminDashboard = () => {
                         </div>
                     </div>
                 </div>
+                )}
+
 
                 {/* ══════════════════════════════════════════
                     LIVE RIDES TRACKER — Paginated + Chat
                 ══════════════════════════════════════════ */}
+                {activeTab === 'rides' && (
                 <div className="bg-white rounded-3xl shadow-sm border border-gray-100 mb-8 overflow-hidden">
                     {/* Header bar */}
                     <div className="flex justify-between items-center px-6 py-5 border-b border-gray-100">
@@ -350,15 +385,13 @@ const AdminDashboard = () => {
                                                                 <span className="bg-blue-800 text-white text-[10px] px-1.5 py-0.5 rounded-full">{rideChatMsgs.length}</span>
                                                             )}
                                                         </button>
-                                                        {/* Delete button — only for completed/cancelled */}
-                                                        {isFinished && (
-                                                            <button
-                                                                onClick={() => handleDeleteRide(r._id)}
-                                                                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold bg-red-50 text-red-600 border border-red-200 hover:bg-red-100 transition"
-                                                            >
-                                                                🗑 Delete
-                                                            </button>
-                                                        )}
+                                                        {/* Delete button — for all statuses */}
+                                                        <button
+                                                            onClick={() => handleDeleteRide(r._id)}
+                                                            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold bg-red-50 text-red-600 border border-red-200 hover:bg-red-100 transition"
+                                                        >
+                                                            🗑 Delete
+                                                        </button>
                                                     </div>
                                                 </td>
                                             </tr>
@@ -418,8 +451,10 @@ const AdminDashboard = () => {
                         </div>
                     )}
                 </div>
+                )}
 
                 {/* Live Activity Log */}
+                {activeTab === 'activity' && (
                 <div className="bg-gray-900 text-white p-6 rounded-3xl shadow-sm mb-8">
                     <div className="flex items-center gap-2 mb-4">
                         <span className="w-3 h-3 bg-green-400 rounded-full animate-pulse"></span>
@@ -436,6 +471,7 @@ const AdminDashboard = () => {
                             ))}
                     </div>
                 </div>
+                )}
             </div>
 
             {/* ══════════════════════════════════
@@ -460,7 +496,7 @@ const AdminDashboard = () => {
                             <button onClick={() => setSelectedDriver(null)} className="text-gray-400 hover:text-white text-3xl font-light transition">✕</button>
                         </div>
                         <div className="p-6 space-y-6">
-                            <div className="grid grid-cols-3 gap-4">
+                            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                                 {[
                                     { label: "Today's", icon: '⚡', color: 'text-green-600', bg: 'bg-green-50', earn: selectedDriver.stats.today.earnings, trips: selectedDriver.stats.today.trips },
                                     { label: 'This Month', icon: '📅', color: 'text-blue-600', bg: 'bg-blue-50', earn: selectedDriver.stats.month.earnings, trips: selectedDriver.stats.month.trips },
@@ -475,19 +511,21 @@ const AdminDashboard = () => {
                                 ))}
                             </div>
                             <div className="bg-gray-50 rounded-2xl p-5 border border-gray-100 flex flex-col md:flex-row items-center gap-4">
-                                <div className="flex-1">
+                                <div className="flex-1 w-full text-center md:text-left">
                                     <h3 className="font-bold text-gray-800">Historical — Pick a Date</h3>
                                     <p className="text-sm text-gray-400">View earnings & trips for any specific day</p>
                                 </div>
                                 <input type="date" value={driverModalDate} onChange={e => setDriverModalDate(e.target.value)}
-                                    className="p-3 border-2 border-gray-200 rounded-xl font-bold text-gray-700 outline-none focus:ring-2 focus:ring-gray-800 bg-white" />
-                                <div className="text-center min-w-[90px]">
-                                    <p className="text-xs text-gray-400 font-bold uppercase">Trips</p>
-                                    <p className="text-2xl font-black text-gray-800">{selectedDriver.stats.ridesByDate?.[driverModalDate]?.trips ?? 0}</p>
-                                </div>
-                                <div className="text-center min-w-[90px]">
-                                    <p className="text-xs text-gray-400 font-bold uppercase">Earned</p>
-                                    <p className="text-2xl font-black text-green-600">₹{selectedDriver.stats.ridesByDate?.[driverModalDate]?.earnings ?? 0}</p>
+                                    className="p-3 w-full md:w-auto border-2 border-gray-200 rounded-xl font-bold text-gray-700 outline-none focus:ring-2 focus:ring-gray-800 bg-white" />
+                                <div className="flex w-full md:w-auto justify-around gap-4 mt-4 md:mt-0">
+                                    <div className="text-center min-w-[90px]">
+                                        <p className="text-xs text-gray-400 font-bold uppercase">Trips</p>
+                                        <p className="text-2xl font-black text-gray-800">{selectedDriver.stats.ridesByDate?.[driverModalDate]?.trips ?? 0}</p>
+                                    </div>
+                                    <div className="text-center min-w-[90px]">
+                                        <p className="text-xs text-gray-400 font-bold uppercase">Earned</p>
+                                        <p className="text-2xl font-black text-green-600">₹{selectedDriver.stats.ridesByDate?.[driverModalDate]?.earnings ?? 0}</p>
+                                    </div>
                                 </div>
                             </div>
                             {selectedDriver.recentRides?.length > 0 && (

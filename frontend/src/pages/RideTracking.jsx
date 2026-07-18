@@ -348,9 +348,6 @@ const RideTracking = () => {
                                         value={driverOTPInput}
                                         onChange={e => setDriverOTPInput(e.target.value.replace(/\D/g, ''))}
                                     />
-                                    <button onClick={handleResendOTP} className="text-blue-500 text-sm font-bold mt-2 hover:underline block mx-auto">
-                                        Resend OTP
-                                    </button>
                                 </div>
                                 <button onClick={() => handleAction('start')}
                                     disabled={driverOTPInput.length !== 4}
@@ -382,9 +379,14 @@ const RideTracking = () => {
                             </div>
                         )}
                         
-                        <button onClick={() => handleAction('cancel')} className="text-red-500 font-bold hover:underline text-sm mt-4 inline-block">
-                            Cancel Ride
-                        </button>
+                        <div className="flex flex-col items-center gap-3 mt-4">
+                            <button onClick={handleResendOTP} className="text-blue-500 font-bold hover:underline text-sm inline-block">
+                                Resend OTP
+                            </button>
+                            <button onClick={() => handleAction('cancel')} className="text-red-500 font-bold hover:underline text-sm inline-block">
+                                Cancel Ride
+                            </button>
+                        </div>
                     </div>
                 )}
             </div>

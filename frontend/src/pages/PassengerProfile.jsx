@@ -79,13 +79,13 @@ const PassengerProfile = () => {
 
       {/* Stats Bar */}
       <div className="bg-white border-b border-stone-100 shadow-sm">
-        <div className="max-w-4xl mx-auto px-6 py-5 grid grid-cols-3 divide-x divide-stone-100">
+        <div className="max-w-4xl mx-auto px-6 py-5 grid grid-cols-1 sm:grid-cols-3 gap-y-4 sm:gap-y-0 divide-y sm:divide-y-0 sm:divide-x divide-stone-100">
           {[
             { label: 'Total Rides', value: rides.length },
             { label: 'Completed', value: completedRides },
             { label: 'Total Spent', value: `₹${totalSpent.toLocaleString('en-IN')}` },
           ].map((s) => (
-            <div key={s.label} className="px-6 first:pl-0 last:pr-0 text-center">
+            <div key={s.label} className="px-6 py-2 sm:py-0 first:pl-0 sm:first:pt-0 last:pr-0 sm:last:pb-0 text-center">
               <p className="text-2xl font-black text-[#1c1917]">{s.value}</p>
               <p className="text-xs text-stone-400 font-bold uppercase tracking-wider mt-0.5">{s.label}</p>
             </div>
