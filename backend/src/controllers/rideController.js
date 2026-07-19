@@ -471,3 +471,50 @@ export const declineRide = async (req, res) => {
     res.status(500).json({ message: 'Server Error' });
   }
 };
+
+// @desc    Passenger rates a completed ride
+// @route   POST /api/rides/:id/rate
+// @access  Private (Passenger)
+export const rateRide = async (req, res) => {
+  try {
+    const { rating, feedback } = req.body;
+
+    if (!rating || rating < 1 || rating > 5) {
+      return res.status(400).json({ message: 'Rating must be between 1 and 5' });
+    }
+
+    const ride = await Ride.findById(req.params.id);
+    if (!ride) return res.status(404).json({ message: 'Ride not found' });
+    if (ride.rideStatus !== 'completed') return res.status(400).json({ message: 'Can only rate completed rides' });
+    if (ride.passengerRating) return res.status(400).json({ message: 'Ride already rated' });
+    if (ride.passengerId.toString() !== req.user._id.toString()) {
+      return res.status(403).json({ message: 'Not authorized to rate this ride' });
+    }
+
+    // Save rating on the ride
+    ride.passengerRating = rating;
+    ride.passengerFeedback = feedback || '';
+    await ride.save();
+
+    // Recalculate driver's average rating across all rated rides
+    if (ride.driverId) {
+      const ratedRides = await Ride.find({
+        driverId: ride.driverId,
+        passengerRating: { $exists: true, $ne: null }
+      }).select('passengerRating');
+
+      if (ratedRides.length > 0) {
+        const avgRating = ratedRides.reduce((sum, r) => sum + r.passengerRating, 0) / ratedRides.length;
+        await Driver.findByIdAndUpdate(ride.driverId, {
+          rating: Math.round(avgRating * 10) / 10  // round to 1 decimal
+        });
+      }
+    }
+
+    res.json({ message: 'Rating submitted successfully', ride });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ message: 'Server Error' });
+  }
+};
+

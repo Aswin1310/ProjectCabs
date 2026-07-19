@@ -65,7 +65,13 @@ export const getAllRides = async (req, res) => {
   try {
     const rides = await Ride.find().sort({ createdAt: -1 })
         .populate('passengerId', 'name phone')
-        .populate('driverId');
+        .populate({
+            path: 'driverId',
+            populate: {
+                path: 'userId',
+                select: 'name email phone'
+            }
+        });
     res.json(rides);
   } catch (error) {
     console.error(error);

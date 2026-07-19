@@ -23,10 +23,6 @@ const PassengerDashboard = () => {
     const [fareEstimate, setFareEstimate] = useState(0);
     const [myLocation, setMyLocation] = useState(null);
 
-    const [isScheduled, setIsScheduled] = useState(false);
-    const [scheduledDate, setScheduledDate] = useState('');
-    const [scheduledTime, setScheduledTime] = useState('');
-
     // Rentals Package selector state
     const [rentalPackage, setRentalPackage] = useState('1 Hour (10 km) - ₹250');
     const [showOutstationTooltip, setShowOutstationTooltip] = useState(false);
@@ -183,8 +179,7 @@ const PassengerDashboard = () => {
                  duration: routeInfo ? Math.ceil(routeInfo.durationS / 60) : (activeTab === 'rentals' ? 60 : 15),
                  fare: fareEstimate,
                  cabType,
-                 rideType: activeTab,
-                 scheduledFor: isScheduled && scheduledDate && scheduledTime ? `${scheduledDate}T${scheduledTime}` : undefined
+                 rideType: activeTab
              });
 
              // If backend says no driver found, show error instantly — no socket needed
@@ -375,20 +370,6 @@ const PassengerDashboard = () => {
                                             ))}
                                         </div>
                                     </div>
-
-                                    <div className="flex items-center gap-3">
-                                        <label className="flex items-center gap-2 cursor-pointer font-bold text-gray-700">
-                                            <input type="checkbox" className="w-5 h-5 accent-black" checked={isScheduled} onChange={(e) => setIsScheduled(e.target.checked)} />
-                                            Schedule for later
-                                        </label>
-                                    </div>
-                                    
-                                    {isScheduled && (
-                                        <div className="grid grid-cols-2 gap-4">
-                                            <input type="date" value={scheduledDate} onChange={(e) => setScheduledDate(e.target.value)} required min={new Date().toISOString().split('T')[0]} className="p-3 border border-gray-200 rounded-xl bg-gray-50 focus:outline-none" />
-                                            <input type="time" value={scheduledTime} onChange={(e) => setScheduledTime(e.target.value)} required className="p-3 border border-gray-200 rounded-xl bg-gray-50 focus:outline-none" />
-                                        </div>
-                                    )}
 
                                     <button 
                                         type="submit" 

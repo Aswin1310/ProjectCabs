@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import api from '../services/api';
 import { useAuth } from '../context/AuthContext';
 import { io } from 'socket.io-client';
+import LeafletMap from '../components/LeafletMap';
 
 const RIDES_PER_PAGE = 10;
 
@@ -13,18 +14,16 @@ const AdminDashboard = () => {
     const [ridesList, setRidesList]   = useState([]);
     const [loading, setLoading]       = useState(true);
 
-    // Live socket counters
     const [liveOnlineDrivers, setLiveOnlineDrivers]       = useState(0);
     const [liveOnlinePassengers, setLiveOnlinePassengers] = useState(0);
-    const [activityLog, setActivityLog] = useState([]);
 
     // Chat monitor: map of rideId -> messages[]
     const [chatLogs, setChatLogs] = useState({});
     // Which ride row has chat expanded
     const [expandedChat, setExpandedChat] = useState(null);
 
-    // Pagination
     const [ridePage, setRidePage] = useState(0);
+    const [selectedRideDate, setSelectedRideDate] = useState(new Date().toISOString().split('T')[0]);
 
     // Tab state
     const [activeTab, setActiveTab] = useState('dashboard');
@@ -37,7 +36,11 @@ const AdminDashboard = () => {
     const [assignRideId, setAssignRideId] = useState(null);
     const [assignDriverId, setAssignDriverId] = useState('');
 
-    const addActivity = (msg) => setActivityLog(prev => [{ msg, ts: new Date().toLocaleTimeString() }, ...prev.slice(0, 49)]);
+    // Live ride view modal
+    const [liveViewRide, setLiveViewRide] = useState(null);
+    const [adminDriverLocations, setAdminDriverLocations] = useState({});
+
+
 
     const openDriverStats = async (driverId) => {
         try {
@@ -82,7 +85,6 @@ const AdminDashboard = () => {
             if (data.rideType === 'rentals' || data.rideType === 'outstation') {
                 alert(`🔔 New ${data.rideType} order received! Check the ${data.rideType} tab.`);
             }
-            addActivity(`🚗 ${data.event?.replace(/_/g, ' ') || 'Ride update'} [${(data.rideId?.toString() || '').slice(-6).toUpperCase()}]`);
             fetchDashboardData();
         });
 
@@ -92,8 +94,6 @@ const AdminDashboard = () => {
         });
 
         socket.on('adminDriverStatus', (data) => {
-            const icon = data.isOnline ? '🟢' : '🔴';
-            addActivity(`${icon} Driver ${data.driverName} went ${data.isOnline ? 'online' : 'offline'}`);
             setDriversList(prev => prev.map(d =>
                 d.userId?._id?.toString() === data.driverId || d.userId?.toString() === data.driverId
                     ? { ...d, isOnline: data.isOnline }
@@ -101,9 +101,7 @@ const AdminDashboard = () => {
             ));
         });
 
-        socket.on('adminEtaUpdate', (data) => {
-            addActivity(`⏱ ETA ${data.etaMinutes} min for ride ${(data.rideId?.toString() || '').slice(-6).toUpperCase()}`);
-        });
+
 
         socket.on('adminChatMessage', (msg) => {
             const rideId = msg.rideId?.toString();
@@ -111,7 +109,13 @@ const AdminDashboard = () => {
                 ...prev,
                 [rideId]: [{ ...msg, ts: new Date().toLocaleTimeString() }, ...(prev[rideId] || [])].slice(0, 100)
             }));
-            addActivity(`💬 Chat [${rideId?.slice(-6).toUpperCase()}]: ${msg.senderName}: "${msg.message.substring(0, 30)}"`);
+        });
+
+        socket.on('adminDriverLocation', (data) => {
+            setAdminDriverLocations(prev => ({
+                ...prev,
+                [data.driverId]: { lng: data.longitude, lat: data.latitude }
+            }));
         });
 
         return () => socket.close();
@@ -123,7 +127,6 @@ const AdminDashboard = () => {
         try {
             await api.delete(`/admin/rides/${rideId}`);
             setRidesList(prev => prev.filter(r => r._id !== rideId));
-            addActivity(`🗑 Ride ${rideId.slice(-6).toUpperCase()} deleted by admin`);
         } catch (err) {
             alert(err.response?.data?.message || 'Failed to delete ride');
         }
@@ -143,8 +146,18 @@ const AdminDashboard = () => {
     };
 
     // Pagination helpers
-    const totalPages = Math.ceil(ridesList.length / RIDES_PER_PAGE);
-    const pagedRides = ridesList.slice(ridePage * RIDES_PER_PAGE, (ridePage + 1) * RIDES_PER_PAGE);
+    const currentRidesList = ridesList.filter(r => {
+        const rideDate = new Date(r.createdAt).toISOString().split('T')[0];
+        return rideDate === selectedRideDate;
+    });
+
+    const totalPages = Math.ceil(currentRidesList.length / RIDES_PER_PAGE);
+    const pagedRides = currentRidesList.slice(ridePage * RIDES_PER_PAGE, (ridePage + 1) * RIDES_PER_PAGE);
+
+    // Watch for date change to reset pagination
+    useEffect(() => {
+        setRidePage(0);
+    }, [selectedRideDate]);
 
     const statusColors = {
         completed: 'bg-green-100 text-green-800',
@@ -174,15 +187,14 @@ const AdminDashboard = () => {
 
                 {/* Tabs NAVIGATION */}
                 <div className="flex flex-wrap gap-3 mb-8 border-b border-gray-200 pb-5">
-                    {['dashboard', 'users', 'drivers', 'rides', 'rentals', 'outstation', 'activity'].map(tab => {
+                    {['dashboard', 'users', 'drivers', 'rides', 'rentals', 'outstation'].map(tab => {
                         const tabNames = {
                             dashboard: 'Dashboard',
                             users: 'User Overview',
                             drivers: 'Driver Overview',
-                            rides: 'Live Ride Track',
+                            rides: 'Rides Hub',
                             rentals: 'Rental Orders',
-                            outstation: 'Outstation Orders',
-                            activity: 'Live Activity'
+                            outstation: 'Outstation Orders'
                         };
                         return (
                         <button
@@ -198,11 +210,7 @@ const AdminDashboard = () => {
 
                 {/* Stats Grid */}
                 {activeTab === 'dashboard' && stats && (
-                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-6 gap-4 mb-8">
-                        <div className="bg-white p-5 rounded-2xl shadow-sm border border-gray-100 flex flex-col">
-                            <span className="text-gray-500 font-bold text-xs uppercase">Total Revenue</span>
-                            <h2 className="text-3xl font-black text-green-600 mt-2">${stats.totalEarnings}</h2>
-                        </div>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
                         <div className="bg-white p-5 rounded-2xl shadow-sm border border-gray-100 flex flex-col">
                             <span className="text-gray-500 font-bold text-xs uppercase">Active Rides</span>
                             <h2 className="text-3xl font-black text-secondary mt-2">{stats.activeRides}</h2>
@@ -220,12 +228,6 @@ const AdminDashboard = () => {
                                 <span className="w-2 h-2 bg-green-500 rounded-full animate-pulse inline-block"></span>Online Drivers
                             </span>
                             <h2 className="text-3xl font-black text-green-600 mt-2">{liveOnlineDrivers}</h2>
-                        </div>
-                        <div className="bg-blue-50 p-5 rounded-2xl shadow-sm border border-blue-200 flex flex-col">
-                            <span className="text-blue-600 font-bold text-xs uppercase flex items-center gap-1">
-                                <span className="w-2 h-2 bg-blue-500 rounded-full animate-pulse inline-block"></span>Online Passengers
-                            </span>
-                            <h2 className="text-3xl font-black text-blue-600 mt-2">{liveOnlinePassengers}</h2>
                         </div>
                     </div>
                 )}
@@ -261,7 +263,8 @@ const AdminDashboard = () => {
                                         </div>
                                         <div className="text-right">
                                             <p className={`text-sm font-bold ${d.isOnline ? 'text-green-500' : 'text-gray-400'}`}>{d.isOnline ? '🟢 Online' : '⚫ Offline'}</p>
-                                            <p className="text-xs text-gray-400 mt-1">Tap to view stats →</p>
+                                            <p className="text-xs text-yellow-500 font-bold mt-0.5">⭐ {(d.rating ?? 5.0).toFixed(1)} avg rating</p>
+                                            <p className="text-xs text-gray-400 mt-0.5">Tap to view stats →</p>
                                         </div>
                                     </div>
                                 )) : <p className="text-gray-500 text-center py-4">No drivers found.</p>}
@@ -278,27 +281,44 @@ const AdminDashboard = () => {
                 {activeTab === 'rides' && (
                 <div className="bg-white rounded-3xl shadow-sm border border-gray-100 mb-8 overflow-hidden">
                     {/* Header bar */}
-                    <div className="flex justify-between items-center px-6 py-5 border-b border-gray-100">
+                    <div className="flex flex-col md:flex-row justify-between items-start md:items-center px-6 py-5 border-b border-gray-100 gap-4">
                         <div className="flex items-center gap-3">
-                            <span className="w-3 h-3 bg-green-400 rounded-full animate-pulse"></span>
-                            <h2 className="text-2xl font-bold">Live Rides Tracker</h2>
-                            <span className="text-xs bg-gray-100 text-gray-600 px-2 py-1 rounded-full font-bold">{ridesList.length} total</span>
+                            {selectedRideDate === new Date().toISOString().split('T')[0] && (
+                                <span className="w-3 h-3 bg-green-400 rounded-full animate-pulse"></span>
+                            )}
+                            <h2 className="text-2xl font-bold">Rides Hub</h2>
+                            <span className="text-xs bg-gray-100 text-gray-600 px-2 py-1 rounded-full font-bold">{currentRidesList.length} rides found</span>
                         </div>
-                        {/* Pagination controls */}
-                        <div className="flex items-center gap-3">
-                            <span className="text-sm text-gray-500 font-semibold">
-                                Page {totalPages === 0 ? 0 : ridePage + 1} / {totalPages}
-                            </span>
-                            <button
-                                disabled={ridePage === 0}
-                                onClick={() => setRidePage(p => p - 1)}
-                                className="px-4 py-2 rounded-xl bg-gray-100 hover:bg-gray-200 text-gray-700 font-bold text-sm transition disabled:opacity-40 disabled:cursor-not-allowed"
-                            >← Prev</button>
-                            <button
-                                disabled={ridePage >= totalPages - 1}
-                                onClick={() => setRidePage(p => p + 1)}
-                                className="px-4 py-2 rounded-xl bg-gray-900 hover:bg-gray-700 text-white font-bold text-sm transition disabled:opacity-40 disabled:cursor-not-allowed"
-                            >Next →</button>
+                        
+                        <div className="flex items-center gap-6">
+                            {/* Date Picker */}
+                            <div className="flex items-center gap-2">
+                                <span className="text-xs font-bold text-gray-400 uppercase tracking-widest hidden sm:block">Date</span>
+                                <input 
+                                    type="date"
+                                    value={selectedRideDate}
+                                    onChange={(e) => setSelectedRideDate(e.target.value)}
+                                    className="p-2 border border-gray-200 rounded-xl bg-gray-50 font-bold outline-none focus:ring-2 focus:ring-gray-300 text-sm"
+                                    max={new Date().toISOString().split('T')[0]} // prevent future dates for historical filter
+                                />
+                            </div>
+
+                            {/* Pagination controls */}
+                            <div className="flex items-center gap-3">
+                                <span className="text-sm text-gray-500 font-semibold hidden sm:block">
+                                    Page {totalPages === 0 ? 0 : ridePage + 1} / {totalPages}
+                                </span>
+                                <button
+                                    disabled={ridePage === 0}
+                                    onClick={() => setRidePage(p => p - 1)}
+                                    className="px-4 py-2 rounded-xl bg-gray-100 hover:bg-gray-200 text-gray-700 font-bold text-sm transition disabled:opacity-40 disabled:cursor-not-allowed"
+                                >← Prev</button>
+                                <button
+                                    disabled={ridePage >= totalPages - 1}
+                                    onClick={() => setRidePage(p => p + 1)}
+                                    className="px-4 py-2 rounded-xl bg-gray-900 hover:bg-gray-700 text-white font-bold text-sm transition disabled:opacity-40 disabled:cursor-not-allowed"
+                                >Next →</button>
+                            </div>
                         </div>
                     </div>
 
@@ -359,6 +379,13 @@ const AdminDashboard = () => {
                                                             {rideChatMsgs.length > 0 && (
                                                                 <span className="bg-blue-800 text-white text-[10px] px-1.5 py-0.5 rounded-full">{rideChatMsgs.length}</span>
                                                             )}
+                                                        </button>
+                                                        {/* Map View button */}
+                                                        <button
+                                                            onClick={() => setLiveViewRide(r)}
+                                                            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold bg-green-50 text-green-700 border border-green-200 hover:bg-green-100 transition"
+                                                        >
+                                                            📍 Map View
                                                         </button>
                                                         {/* Delete button — for all statuses */}
                                                         <button
@@ -500,25 +527,7 @@ const AdminDashboard = () => {
                 </div>
                 )}
 
-                {/* Live Activity Log */}
-                {activeTab === 'activity' && (
-                <div className="bg-gray-900 text-white p-6 rounded-3xl shadow-sm mb-8">
-                    <div className="flex items-center gap-2 mb-4">
-                        <span className="w-3 h-3 bg-green-400 rounded-full animate-pulse"></span>
-                        <h2 className="text-xl font-bold">Live Activity Log</h2>
-                    </div>
-                    <div className="max-h-64 overflow-y-auto space-y-2 pr-1">
-                        {activityLog.length === 0
-                            ? <p className="text-gray-500 text-sm text-center py-6">Waiting for events...</p>
-                            : activityLog.map((entry, i) => (
-                                <div key={i} className="flex items-start gap-3 text-sm">
-                                    <span className="text-gray-500 text-xs flex-shrink-0 mt-0.5">{entry.ts}</span>
-                                    <span className="text-gray-200">{entry.msg}</span>
-                                </div>
-                            ))}
-                    </div>
-                </div>
-                )}
+
             </div>
 
             {/* ══════════════════════════════════
@@ -640,6 +649,130 @@ const AdminDashboard = () => {
                             >
                                 Dispatch Driver
                             </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* ══════════════════════════════════
+                LIVE RIDE MONITOR MODAL (3-Columns)
+            ══════════════════════════════════ */}
+            {liveViewRide && (
+                <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4">
+                    <div className="bg-gray-100 rounded-3xl w-full max-w-7xl h-[85vh] flex flex-col shadow-2xl overflow-hidden">
+                        
+                        {/* Header */}
+                        <div className="bg-gray-900 px-6 py-4 flex justify-between items-center shrink-0">
+                            <div className="flex items-center gap-3">
+                                <span className="w-3 h-3 bg-green-400 rounded-full animate-pulse"></span>
+                                <h2 className="text-xl font-bold text-white">Live Monitoring: Ride #{liveViewRide._id.slice(-8).toUpperCase()}</h2>
+                                <span className="bg-white/20 text-white text-xs px-3 py-1 rounded-full font-bold">
+                                    {liveViewRide.rideStatus.toUpperCase()}
+                                </span>
+                            </div>
+                            <button onClick={() => setLiveViewRide(null)} className="text-gray-400 hover:text-white text-3xl font-light">✕</button>
+                        </div>
+
+                        {/* 3 Columns content */}
+                        <div className="flex-1 flex flex-col md:flex-row min-h-0">
+                            
+                            {/* Column 1: Passenger */}
+                            <div className="w-full md:w-1/4 bg-white border-r border-gray-200 p-6 overflow-y-auto">
+                                <h3 className="text-lg font-black text-gray-800 mb-6 flex items-center gap-2">👤 Passenger</h3>
+                                <div className="space-y-4">
+                                    <div>
+                                        <p className="text-xs text-gray-400 font-bold uppercase mb-1">Name</p>
+                                        <p className="font-semibold text-lg">{liveViewRide.passengerId?.name || 'Unknown'}</p>
+                                    </div>
+                                    <div>
+                                        <p className="text-xs text-gray-400 font-bold uppercase mb-1">Phone</p>
+                                        <p className="font-semibold">{liveViewRide.passengerId?.phone || '—'}</p>
+                                    </div>
+                                    <hr className="border-gray-100" />
+                                    <div>
+                                        <p className="text-xs text-gray-400 font-bold uppercase mb-1">Pickup</p>
+                                        <p className="font-semibold text-sm text-gray-700">{liveViewRide.pickup}</p>
+                                    </div>
+                                    <div>
+                                        <p className="text-xs text-gray-400 font-bold uppercase mb-1">Destination</p>
+                                        <p className="font-semibold text-sm text-gray-700">{liveViewRide.destination}</p>
+                                    </div>
+                                    <div className="bg-gray-50 p-4 rounded-xl border border-gray-100 mt-4">
+                                        <p className="text-xs text-gray-400 font-bold uppercase mb-1">Total Fare / Dist</p>
+                                        <p className="font-black text-2xl text-green-600">${liveViewRide.fare} <span className="text-sm font-normal text-gray-500">/ {liveViewRide.distance} km</span></p>
+                                    </div>
+                                </div>
+                            </div>
+                            
+                            {/* Column 2: Driver */}
+                            <div className="w-full md:w-1/4 bg-white border-r border-gray-200 p-6 overflow-y-auto">
+                                <h3 className="text-lg font-black text-gray-800 mb-6 flex items-center gap-2">🚗 Driver</h3>
+                                {liveViewRide.driverId ? (
+                                    <div className="space-y-4">
+                                        <div>
+                                            <p className="text-xs text-gray-400 font-bold uppercase mb-1">Assigned Driver</p>
+                                            <p className="font-semibold text-lg">
+                                                {liveViewRide.driverId.userId?.name || 'Assigned Driver'}
+                                            </p>
+                                        </div>
+                                        <div>
+                                            <p className="text-xs text-gray-400 font-bold uppercase mb-1">Vehicle</p>
+                                            <p className="font-semibold">{liveViewRide.driverId.vehicleNumber} <span className="text-sm text-gray-500">({liveViewRide.driverId.vehicleType})</span></p>
+                                        </div>
+                                        <div>
+                                            <p className="text-xs text-gray-400 font-bold uppercase mb-1">Rating</p>
+                                            <p className="font-semibold">⭐ {liveViewRide.driverId.rating}</p>
+                                        </div>
+                                        <hr className="border-gray-100" />
+                                        <div className="bg-blue-50 p-4 rounded-xl border border-blue-100 mt-4">
+                                            <p className="text-xs text-blue-400 font-bold uppercase mb-1">Live Coordinates</p>
+                                            {adminDriverLocations[liveViewRide.driverId.userId?._id] || adminDriverLocations[liveViewRide.driverId.userId] ? (
+                                                <p className="font-semibold text-blue-800 text-sm font-mono tracking-tighter">
+                                                    {(adminDriverLocations[liveViewRide.driverId.userId?._id] || adminDriverLocations[liveViewRide.driverId.userId]).lat.toFixed(5)}, 
+                                                    <br/>
+                                                    {(adminDriverLocations[liveViewRide.driverId.userId?._id] || adminDriverLocations[liveViewRide.driverId.userId]).lng.toFixed(5)}
+                                                </p>
+                                            ) : (
+                                                <p className="text-gray-500 text-sm italic">Tracking not available</p>
+                                            )}
+                                        </div>
+                                    </div>
+                                ) : (
+                                    <div className="flex flex-col items-center justify-center h-40 text-gray-400 text-center">
+                                        <span className="text-3xl mb-2">⏳</span>
+                                        <p>Searching for driver...</p>
+                                    </div>
+                                )}
+                            </div>
+
+                            {/* Column 3: Live Map */}
+                            <div className="w-full md:w-2/4 bg-gray-50 relative flex-1 min-h-[300px]">
+                                <LeafletMap 
+                                    height="100%"
+                                    zoom={13}
+                                    center={
+                                        liveViewRide.pickupCoordinates?.coordinates 
+                                            ? [liveViewRide.pickupCoordinates.coordinates[1], liveViewRide.pickupCoordinates.coordinates[0]]
+                                            : [11.0168, 76.9558]
+                                    }
+                                    driverPos={
+                                        liveViewRide.driverId 
+                                            ? (adminDriverLocations[liveViewRide.driverId.userId?._id] || adminDriverLocations[liveViewRide.driverId.userId] || null)
+                                            : null
+                                    }
+                                    pickupPos={liveViewRide.pickupCoordinates?.coordinates || null}
+                                    destPos={liveViewRide.destinationCoordinates?.coordinates || null}
+                                    pickupLabel={liveViewRide.pickup}
+                                    destLabel={liveViewRide.destination}
+                                    ridePhase={liveViewRide.rideStatus}
+                                    trackDriver={true}
+                                />
+                                {/* Live GPS badge overlaid */}
+                                <div className="absolute top-4 right-4 bg-white/90 backdrop-blur-md px-4 py-2 rounded-xl shadow-xl flex items-center gap-2 text-sm font-bold z-10">
+                                    <div className={`w-3 h-3 rounded-full animate-pulse ${liveViewRide.driverId && (adminDriverLocations[liveViewRide.driverId.userId?._id] || adminDriverLocations[liveViewRide.driverId.userId]) ? 'bg-green-500' : 'bg-red-500'}`}></div>
+                                    <span>{liveViewRide.driverId && (adminDriverLocations[liveViewRide.driverId.userId?._id] || adminDriverLocations[liveViewRide.driverId.userId]) ? 'Live Tracking Active' : 'No Signal'}</span>
+                                </div>
+                            </div>
                         </div>
                     </div>
                 </div>

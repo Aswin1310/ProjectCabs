@@ -13,14 +13,11 @@ const DriverDashboard = () => {
     const [isOnline, setIsOnline]         = useState(false);
     const [incomingRide, setIncomingRide] = useState(null);
     const [socket, setSocket]             = useState(null);
-    const [earnings, setEarnings]         = useState(0);
-    const [totalTrips, setTotalTrips]     = useState(0);
     const [myLocation, setMyLocation]     = useState(null);
     const [myLocationName, setMyLocationName] = useState('');
+    const [driverRating, setDriverRating] = useState(5.0);
 
     const [radarActive, setRadarActive]   = useState(false); // only true after manual toggle click
-    const [rides, setRides]               = useState([]);
-    const [selectedDate, setSelectedDate] = useState(new Date().toISOString().split('T')[0]);
 
     // Stats states
     const [stats, setStats] = useState({
@@ -35,22 +32,24 @@ const DriverDashboard = () => {
     const geoWatchRef                     = useRef(null);
     const isOnlineRef                     = useRef(false); // mirrors isOnline for socket closures
 
-    /* ── Fetch driver profile, Rides & Locations ─────────────── */
+    /* ── Fetch driver profile & stats ─────────────── */
     useEffect(() => {
         const fetchData = async () => {
             try {
-                const [profileRes, ridesRes, locRes] = await Promise.all([
+                const [profileRes, ridesRes] = await Promise.all([
                     api.get('/driver/me').catch(() => null),
                     api.get('/rides').catch(() => ({ data: [] }))
                 ]);
-                
+
                 if (profileRes?.data) {
                     const online = profileRes.data.isOnline ?? false;
                     setIsOnline(online);
                     isOnlineRef.current = online;
+                    if (profileRes.data.rating !== undefined) {
+                        setDriverRating(profileRes.data.rating);
+                    }
                 }
                 if (ridesRes?.data) {
-                    setRides(ridesRes.data);
                     calculateStats(ridesRes.data);
                 }
 
@@ -71,7 +70,6 @@ const DriverDashboard = () => {
         let todayTrips = 0, todayEarn = 0;
         let monthTrips = 0, monthEarn = 0;
         let allTrips = 0, allEarn = 0;
-        let selTrips = 0, selEarn = 0;
 
         completed.forEach(r => {
             const rDateStr = r.createdAt.substring(0, 10);
@@ -174,9 +172,28 @@ const DriverDashboard = () => {
 
     /* ── Geo-location watch ───────────────────────────── */
     const startGeoWatch = (sock) => {
-        if (!navigator.geolocation) return;
+        if (!navigator.geolocation) {
+            setMyLocationName('GPS Not Supported 🚫');
+            return;
+        }
+
+        // Fallback for desktop/non-https testing where GPS might hang eternally
+        const fallbackTimer = setTimeout(() => {
+            setMyLocation(prev => {
+                if (!prev) {
+                    const fallbackLat = 11.0168, fallbackLon = 76.9558; // Coimbatore
+                    api.put('/driver/location', { longitude: fallbackLon, latitude: fallbackLat }).catch(() => {});
+                    if (sock?.connected) sock.emit('locationUpdate', { longitude: fallbackLon, latitude: fallbackLat });
+                    setMyLocationName(`Fallback GPS Active`);
+                    return { lat: fallbackLat, lng: fallbackLon };
+                }
+                return prev;
+            });
+        }, 5000);
+
         geoWatchRef.current = navigator.geolocation.watchPosition(
             (pos) => {
+                clearTimeout(fallbackTimer);
                 const { longitude, latitude } = pos.coords;
                 if (!isFinite(latitude) || !isFinite(longitude)) return;
                 setMyLocation({ lng: longitude, lat: latitude });
@@ -317,10 +334,10 @@ const DriverDashboard = () => {
                     {/* Stats grid */}
                     <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                         {[
-                            { label: "Today's",        val1: `Earned: $${stats.today.earnings}`, val2: `Trips: ${stats.today.trips}`, icon: '⚡', color: 'text-green-600' },
-                            { label: 'This Month',      val1: `Earned: $${stats.month.earnings}`, val2: `Trips: ${stats.month.trips}`, icon: '📅', color: 'text-blue-600' },
-                            { label: 'All-Time',        val1: `Earned: $${stats.allTime.earnings}`, val2: `Trips: ${stats.allTime.trips}`, icon: '🏆', color: 'text-purple-600' },
-                            { label: 'GPS / Status',    val1: isOnline ? 'Online' : 'Offline', val2: myLocation ? 'Location Active' : 'Location Off', icon: isOnline ? '🟢' : '⚫', color: isOnline ? 'text-green-600' : 'text-gray-500' },
+                            { label: "Today's",      val1: `Earned: $${stats.today.earnings}`, val2: `Trips: ${stats.today.trips}`, icon: '⚡', color: 'text-green-600' },
+                            { label: 'This Month',   val1: `Earned: $${stats.month.earnings}`, val2: `Trips: ${stats.month.trips}`, icon: '📅', color: 'text-blue-600' },
+                            { label: 'All-Time',     val1: `Earned: $${stats.allTime.earnings}`, val2: `Trips: ${stats.allTime.trips}`, icon: '🏆', color: 'text-purple-600' },
+                            { label: 'Avg Rating',   val1: `${driverRating.toFixed(1)} ⭐`, val2: 'Passenger rated', icon: '⭐', color: 'text-yellow-500' },
                         ].map((stat, i) => (
                             <div key={i} className="bg-white rounded-2xl p-5 shadow-sm border border-gray-100 flex flex-col justify-between">
                                 <span className="text-2xl">{stat.icon}</span>
@@ -335,60 +352,20 @@ const DriverDashboard = () => {
 
                     {/* ── Location Pin (shows when online) ── */}
                     {isOnline && (
-                        <div className="bg-white rounded-2xl p-6 shadow-sm border border-gray-100 flex items-center justify-between gap-4">
+                        <div className="bg-white rounded-2xl p-6 shadow-sm border border-gray-100 flex items-center justify-between gap-4 w-full">
                             <div>
-                                <h3 className="text-lg font-bold">📍 Current Active Location</h3>
-                                <p className="text-gray-500 text-sm">This is where passengers see you right now.</p>
+                                <h3 className="text-lg font-bold flex items-center gap-2">📍 Location Broadcast</h3>
+                                <p className="text-gray-500 text-sm">Transmitting your live coordinates.</p>
                             </div>
-                            <div className="bg-green-50 px-4 py-2 rounded-xl border border-green-100 flex items-center gap-2 max-w-sm ml-auto">
-                                <span className="w-2 h-2 bg-green-500 rounded-full animate-pulse flex-shrink-0"></span>
-                                <span className="text-green-700 font-bold text-sm truncate">
-                                    {myLocationName ? myLocationName : myLocation ? `Locating... (${myLocation.lat.toFixed(4)}, ${myLocation.lng.toFixed(4)})` : 'Fetching GPS...'}
+                            <div className={`px-4 py-2 rounded-xl border flex items-center gap-2 max-w-sm ml-auto text-right ${myLocation ? 'bg-green-50 border-green-100' : 'bg-yellow-50 border-yellow-100'}`}>
+                                <span className={`w-2 h-2 rounded-full animate-pulse flex-shrink-0 ${myLocation ? 'bg-green-500' : 'bg-yellow-500'}`}></span>
+                                <span className={`font-bold text-sm truncate ${myLocation ? 'text-green-700' : 'text-yellow-700'}`}>
+                                    {myLocationName ? myLocationName : myLocation ? `Locating... (${myLocation.lat.toFixed(4)}, ${myLocation.lng.toFixed(4)})` : 'Waiting for Signal...'}
                                 </span>
                             </div>
                         </div>
                     )}
 
-                    {/* ── Past Rides & Details ── */}
-                    <div className="bg-white rounded-2xl p-6 shadow-sm border border-gray-100">
-                        <div className="flex justify-between items-center mb-6">
-                            <div>
-                                <h3 className="text-xl font-bold">Past Rides</h3>
-                                <p className="text-sm text-gray-500">View your ride history by date</p>
-                            </div>
-                            <input 
-                                type="date" 
-                                value={selectedDate} 
-                                onChange={(e) => setSelectedDate(e.target.value)} 
-                                className="p-2 border border-gray-200 rounded-xl bg-gray-50 font-bold outline-none focus:ring-2 focus:ring-gray-300"
-                            />
-                        </div>
-                        <div className="space-y-4 max-h-96 overflow-y-auto pr-2">
-                            {(() => {
-                                const filtered = rides.filter(r => r.createdAt.startsWith(selectedDate));
-                                if (filtered.length === 0) return <p className="text-center text-gray-400 py-6">No rides found for this date.</p>;
-                                return filtered.map(ride => (
-                                    <div key={ride._id} className="p-4 border border-gray-100 rounded-xl bg-gray-50 flex flex-col md:flex-row justify-between gap-4">
-                                        <div className="flex-1 space-y-2">
-                                            <div className="flex items-center gap-2 text-sm text-gray-500">
-                                                <span className="font-bold">{new Date(ride.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
-                                                <span>·</span>
-                                                <span className={`px-2 py-0.5 rounded font-bold text-xs ${ride.rideStatus === 'completed' ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
-                                                    {ride.rideStatus.toUpperCase()}
-                                                </span>
-                                            </div>
-                                            <p className="font-semibold text-gray-800 text-sm truncate max-w-[250px]"><span className="text-blue-500 mr-2">🟢</span>{ride.pickup}</p>
-                                            <p className="font-semibold text-gray-800 text-sm truncate max-w-[250px]"><span className="text-green-500 mr-2">📍</span>{ride.destination}</p>
-                                        </div>
-                                        <div className="text-right flex flex-col justify-center">
-                                            <p className="text-2xl font-black text-green-600">${ride.fare}</p>
-                                            <p className="text-xs font-bold text-gray-400">Distance: {ride.distance} km</p>
-                                        </div>
-                                    </div>
-                                ));
-                            })()}
-                        </div>
-                    </div>
                 </div>
             </div>
 
@@ -452,12 +429,14 @@ const DriverDashboard = () => {
                             {/* Actions */}
                             <div className="space-y-3">
                                 <button id="accept-ride-btn" onClick={acceptRide}
-                                    className="w-full bg-green-500 text-white font-black text-xl py-4 rounded-xl hover:bg-green-600 transition shadow-lg">
-                                    ✅ ACCEPT RIDE
+                                    className="w-full bg-gradient-to-r from-emerald-500 to-emerald-600 text-white font-extrabold text-lg py-3.5 rounded-2xl hover:from-emerald-400 hover:to-emerald-500 transition-all shadow-md flex items-center justify-center gap-2">
+                                    <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M5 13l4 4L19 7"/></svg>
+                                    Accept Ride
                                 </button>
                                 <button id="decline-ride-btn" onClick={declineRide}
-                                    className="w-full bg-gray-100 text-gray-600 font-bold text-lg py-3 rounded-xl hover:bg-gray-200 transition">
-                                    ✗ Decline
+                                    className="w-full bg-white border-2 border-stone-200 text-stone-500 font-bold text-lg py-3 rounded-2xl hover:border-red-200 hover:bg-red-50 hover:text-red-500 transition-all flex items-center justify-center gap-2">
+                                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M6 18L18 6M6 6l12 12"/></svg>
+                                    Decline (Auto in {countdown}s)
                                 </button>
                             </div>
                         </div>

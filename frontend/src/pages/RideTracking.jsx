@@ -52,6 +52,14 @@ const RideTracking = () => {
     const [cancelReason, setCancelReason] = useState('Changed my mind');
     const cancelReasons = ['Changed my mind', 'Driver asked me to cancel', 'Driver is too far', 'Booked by mistake', 'Other'];
 
+    /* Rating Modal */
+    const [ratingModalOpen, setRatingModalOpen] = useState(false);
+    const [selectedRating, setSelectedRating] = useState(0);
+    const [hoverRating, setHoverRating] = useState(0);
+    const [ratingFeedback, setRatingFeedback] = useState('');
+    const [ratingSubmitted, setRatingSubmitted] = useState(false);
+    const [ratingSubmitting, setRatingSubmitting] = useState(false);
+
     /* Live ETA Timer */
     useEffect(() => {
         if (!etaMinutes || etaMinutes <= 0) return;
@@ -61,19 +69,49 @@ const RideTracking = () => {
         return () => clearInterval(timer);
     }, [etaMinutes]);
 
-    /* Auto-navigate away if completed / cancelled */
+    const isDriver = user.role === 'driver';
+
+    /* Auto-navigate away if completed (show rating modal first for passenger) / cancelled */
     useEffect(() => {
-        if (ride && (ride.rideStatus === 'completed' || ride.rideStatus === 'cancelled')) {
+        if (!ride) return;
+        if (ride.rideStatus === 'completed' && !isDriver && !ratingSubmitted) {
+            // Show rating modal automatically, wait for Passenger to submit or skip
+            if (!ratingModalOpen) setRatingModalOpen(true);
+            return;
+        }
+        if (ride.rideStatus === 'completed' && isDriver) {
             const timer = setTimeout(() => {
                 navigate(`/${user.role}-dashboard`, { replace: true });
             }, 3500);
             return () => clearTimeout(timer);
         }
-    }, [ride?.rideStatus, navigate, user.role]);
+        if (ride.rideStatus === 'cancelled') {
+            const timer = setTimeout(() => {
+                navigate(`/${user.role}-dashboard`, { replace: true });
+            }, 3500);
+            return () => clearTimeout(timer);
+        }
+    }, [ride?.rideStatus, navigate, user.role, isDriver, ratingSubmitted, ratingModalOpen]);
 
-    const isDriver = user.role === 'driver';
+    const submitRating = async () => {
+        if (!selectedRating) return;
+        setRatingSubmitting(true);
+        try {
+            await api.post(`/rides/${ride._id}/rate`, {
+                rating: selectedRating,
+                feedback: ratingFeedback
+            });
+            setRatingSubmitted(true);
+            setRatingModalOpen(false);
+            setTimeout(() => navigate(`/${user.role}-dashboard`, { replace: true }), 1500);
+        } catch (err) {
+            console.error('Rating failed:', err);
+        } finally {
+            setRatingSubmitting(false);
+        }
+    };
 
-    /* ── Show toast ─────────────────────────────────────── */
+    /* ── Show toast ──────────────────────────────────────────────── */
     const showToast = (message, type = 'info') => {
         setToast({ message, type });
         setTimeout(() => setToast(null), 4000);
@@ -302,6 +340,7 @@ const RideTracking = () => {
     const statusCfg = STATUS_CONFIG[ride.rideStatus] || STATUS_CONFIG.pending;
 
     return (
+        <>
         <div className="min-h-[calc(100vh-4rem)] flex flex-col md:flex-row bg-gray-100 relative">
 
             {/* ── Toast ──────────────────────────────────── */}
@@ -576,6 +615,86 @@ const RideTracking = () => {
                 </div>
             )}
         </div>
+
+        {/* ══════════════════════════════════
+            PASSENGER RATING MODAL
+        ══════════════════════════════════ */}
+        {ratingModalOpen && !isDriver && (
+            <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4">
+                <div className="bg-white rounded-3xl w-full max-w-sm shadow-2xl overflow-hidden">
+                    {/* Header */}
+                    <div className="bg-gray-900 p-6 text-center">
+                        <div className="text-5xl mb-2">🎉</div>
+                        <h2 className="text-xl font-black text-white">Ride Completed!</h2>
+                        <p className="text-gray-400 text-sm mt-1">How was your experience?</p>
+                    </div>
+                    <div className="p-6 space-y-5">
+                        {/* Driver info */}
+                        {ride?.driverId && (
+                            <div className="flex items-center gap-3 bg-gray-50 rounded-2xl p-4 border border-gray-100">
+                                <div className="w-12 h-12 rounded-xl bg-yellow-100 flex items-center justify-center text-2xl">🚗</div>
+                                <div>
+                                    <p className="font-bold text-gray-800">{ride.driverId?.userId?.name || 'Your Driver'}</p>
+                                    <p className="text-xs text-gray-500">{ride.driverId?.vehicleNumber} · {ride.driverId?.vehicleType}</p>
+                                </div>
+                            </div>
+                        )}
+
+                        {/* Star Rating */}
+                        <div className="text-center">
+                            <p className="text-sm font-bold text-gray-500 uppercase tracking-wider mb-3">Tap to Rate</p>
+                            <div className="flex justify-center gap-2">
+                                {[1,2,3,4,5].map(star => (
+                                    <button
+                                        key={star}
+                                        onClick={() => setSelectedRating(star)}
+                                        onMouseEnter={() => setHoverRating(star)}
+                                        onMouseLeave={() => setHoverRating(0)}
+                                        className="text-4xl transition-transform hover:scale-110 focus:outline-none"
+                                    >
+                                        <span className={(hoverRating || selectedRating) >= star ? 'text-yellow-400' : 'text-gray-200'}>
+                                            ★
+                                        </span>
+                                    </button>
+                                ))}
+                            </div>
+                            {selectedRating > 0 && (
+                                <p className="text-sm font-bold mt-2 text-gray-600">
+                                    {['', 'Poor', 'Fair', 'Good', 'Very Good', 'Excellent!'][selectedRating]}
+                                </p>
+                            )}
+                        </div>
+
+                        {/* Feedback */}
+                        <textarea
+                            value={ratingFeedback}
+                            onChange={e => setRatingFeedback(e.target.value)}
+                            placeholder="Leave a comment (optional)..."
+                            rows={3}
+                            className="w-full p-3 border border-gray-200 rounded-xl text-sm outline-none focus:ring-2 focus:ring-gray-800 resize-none"
+                        />
+
+                        {/* Actions */}
+                        <div className="space-y-2">
+                            <button
+                                onClick={submitRating}
+                                disabled={!selectedRating || ratingSubmitting}
+                                className="w-full bg-gray-900 text-white font-bold py-3 rounded-xl hover:bg-gray-700 transition disabled:opacity-50 disabled:cursor-not-allowed"
+                            >
+                                {ratingSubmitting ? 'Submitting...' : '⭐ Submit Rating'}
+                            </button>
+                            <button
+                                onClick={() => { setRatingModalOpen(false); navigate(`/${user.role}-dashboard`, { replace: true }); }}
+                                className="w-full text-gray-400 text-sm py-2 hover:text-gray-600 transition"
+                            >
+                                Skip
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        )}
+        </>
     );
 };
 

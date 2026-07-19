@@ -14,6 +14,7 @@ const DriverProfile = () => {
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState('overview');
   const [currentPage, setCurrentPage] = useState(1);
+  const [selectedHistoryDate, setSelectedHistoryDate] = useState(new Date().toISOString().split('T')[0]);
 
   useEffect(() => {
     const fetchAll = async () => {
@@ -136,7 +137,7 @@ const DriverProfile = () => {
           {[
             { id: 'overview', label: 'Overview' },
             { id: 'vehicle', label: 'Vehicle & License' },
-            { id: 'history', label: `Earnings & History` },
+            { id: 'history', label: 'Rides & Earnings' },
           ].map(t => (
             <button
               key={t.id}
@@ -266,79 +267,120 @@ const DriverProfile = () => {
           </div>
         )}
 
-        {/* EARNINGS & HISTORY TAB */}
         {activeTab === 'history' && (
           <div className="pb-10">
-            <div className="bg-white rounded-3xl shadow-sm border border-stone-100 overflow-hidden">
-                <div className="p-6 border-b border-stone-100 bg-stone-50">
-                    <h2 className="text-xl font-bold">Your Managed Rides</h2>
-                </div>
-                <div className="overflow-x-auto">
-                    <table className="min-w-full divide-y divide-stone-100">
-                        <thead className="bg-white">
-                            <tr>
-                                {['Date', 'Route', 'Passenger', 'Fare', 'Status'].map(h => (
-                                    <th key={h} className="px-6 py-4 text-left text-xs font-bold text-stone-500 uppercase tracking-wider">{h}</th>
-                                ))}
-                            </tr>
-                        </thead>
-                        <tbody className="bg-white divide-y divide-stone-100">
-                            {loading ? (
-                                <tr>
-                                    <td colSpan="5" className="px-6 py-10 text-center text-stone-400">Loading...</td>
-                                </tr>
-                            ) : recentRides.length > 0 ? recentRides.slice((currentPage - 1) * 10, currentPage * 10).map((ride, i) => (
-                                <tr key={ride._id || i} className="hover:bg-stone-50 transition cursor-pointer" onClick={() => navigate(`/ride/${ride._id}`)}>
-                                    <td className="px-6 py-4 whitespace-nowrap text-sm text-stone-600 font-medium">
-                                        {formatDate(ride.createdAt)}
-                                    </td>
-                                    <td className="px-6 py-4 text-sm max-w-[200px]">
-                                        <div className="font-bold text-stone-800 truncate">{ride.pickup} → {ride.destination}</div>
-                                    </td>
-                                    <td className="px-6 py-4 whitespace-nowrap text-sm text-stone-600">
-                                        {ride.passengerId?.name || 'User'}
-                                    </td>
-                                    <td className="px-6 py-4 whitespace-nowrap text-sm font-bold text-green-600">
-                                        ₹{ride.fare}
-                                    </td>
-                                    <td className="px-6 py-4 whitespace-nowrap">
-                                        <span className={`px-3 py-1 inline-flex text-xs leading-5 font-bold rounded-full ${statusColors[ride.rideStatus]}`}>
-                                            {ride.rideStatus}
-                                        </span>
-                                    </td>
-                                </tr>
-                            )) : (
-                                <tr>
-                                    <td colSpan="5" className="px-6 py-10 text-center text-stone-400">
-                                        No rides found.
-                                    </td>
-                                </tr>
-                            )}
-                        </tbody>
-                    </table>
-                </div>
 
-                {recentRides.length > 10 && (
-                    <div className="p-4 border-t border-stone-100 bg-white flex justify-between items-center">
-                        <button 
-                            disabled={currentPage === 1}
-                            onClick={() => setCurrentPage(prev => prev - 1)}
-                            className="px-4 py-2 text-sm font-bold border border-stone-200 rounded-lg hover:bg-stone-50 disabled:opacity-50 disabled:cursor-not-allowed"
-                        >
-                            Previous
-                        </button>
-                        <span className="text-sm font-bold text-stone-600">
-                            Page {currentPage} of {Math.ceil(recentRides.length / 10)}
-                        </span>
-                        <button 
-                            disabled={currentPage === Math.ceil(recentRides.length / 10)}
-                            onClick={() => setCurrentPage(prev => prev + 1)}
-                            className="px-4 py-2 text-sm font-bold border border-stone-200 rounded-lg hover:bg-stone-50 disabled:opacity-50 disabled:cursor-not-allowed"
-                        >
-                            Next
-                        </button>
-                    </div>
-                )}
+            {/* Date Picker + Summary Row */}
+            <div className="bg-[#0F0F10] rounded-2xl p-5 text-white mb-5 flex flex-col md:flex-row items-center gap-5">
+              <div className="flex-1">
+                <h2 className="text-sm font-extrabold uppercase tracking-wider text-stone-400 mb-1">Browse Ride History</h2>
+                <p className="text-stone-500 text-xs">Pick a date to view rides & earnings for that day</p>
+              </div>
+              <input
+                type="date"
+                value={selectedHistoryDate}
+                onChange={e => { setSelectedHistoryDate(e.target.value); setCurrentPage(1); }}
+                max={new Date().toISOString().split('T')[0]}
+                className="p-3 rounded-xl bg-stone-800 border border-stone-700 font-bold text-white outline-none focus:ring-2 focus:ring-yellow-500 text-sm"
+              />
+              {/* Day summary */}
+              <div className="flex gap-6">
+                {(() => {
+                  const dayRides = recentRides.filter(r => r.createdAt?.substring(0,10) === selectedHistoryDate && r.rideStatus === 'completed');
+                  const dayEarn = dayRides.reduce((s, r) => s + (r.fare || 0), 0);
+                  return (
+                    <>
+                      <div className="text-center">
+                        <p className="text-xs text-stone-500 font-bold uppercase tracking-wider">Trips</p>
+                        <p className="text-2xl font-black text-[#EAB308]">{dayRides.length}</p>
+                      </div>
+                      <div className="text-center">
+                        <p className="text-xs text-stone-500 font-bold uppercase tracking-wider">Earned</p>
+                        <p className="text-2xl font-black text-green-400">₹{dayEarn.toLocaleString('en-IN')}</p>
+                      </div>
+                    </>
+                  );
+                })()}
+              </div>
+            </div>
+
+            {/* Filtered Ride Table */}
+            <div className="bg-white rounded-3xl shadow-sm border border-stone-100 overflow-hidden">
+              <div className="p-5 border-b border-stone-100 bg-stone-50 flex items-center justify-between">
+                <h2 className="text-base font-bold text-stone-700">
+                  Rides on <span className="text-[#1c1917]">{new Date(selectedHistoryDate + 'T00:00:00').toLocaleDateString('en-IN', { day: 'numeric', month: 'long', year: 'numeric' })}</span>
+                </h2>
+                {(() => {
+                  const count = recentRides.filter(r => r.createdAt?.substring(0,10) === selectedHistoryDate).length;
+                  return <span className="text-xs bg-stone-200 text-stone-600 px-3 py-1 rounded-full font-bold">{count} ride{count !== 1 ? 's' : ''}</span>;
+                })()}
+              </div>
+              <div className="overflow-x-auto">
+                <table className="min-w-full divide-y divide-stone-100">
+                  <thead className="bg-white">
+                    <tr>
+                      {['Time', 'Route', 'Passenger', 'Fare', 'Status'].map(h => (
+                        <th key={h} className="px-6 py-4 text-left text-xs font-bold text-stone-500 uppercase tracking-wider">{h}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody className="bg-white divide-y divide-stone-100">
+                    {loading ? (
+                      <tr><td colSpan="5" className="px-6 py-10 text-center text-stone-400">Loading...</td></tr>
+                    ) : (() => {
+                      const filtered = recentRides.filter(r => r.createdAt?.substring(0,10) === selectedHistoryDate);
+                      const paginated = filtered.slice((currentPage - 1) * 10, currentPage * 10);
+                      if (filtered.length === 0) return (
+                        <tr><td colSpan="5" className="px-6 py-12 text-center text-stone-400">
+                          <div className="text-3xl mb-2">📭</div>
+                          <p className="font-semibold">No rides on this date.</p>
+                          <p className="text-xs mt-1">Try a different date from the picker above.</p>
+                        </td></tr>
+                      );
+                      return paginated.map((ride, i) => (
+                        <tr key={ride._id || i} className="hover:bg-stone-50 transition cursor-pointer" onClick={() => navigate(`/ride/${ride._id}`)}>
+                          <td className="px-6 py-4 whitespace-nowrap text-sm text-stone-500 font-medium">
+                            {new Date(ride.createdAt).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })}
+                          </td>
+                          <td className="px-6 py-4 text-sm max-w-[200px]">
+                            <div className="font-bold text-stone-800 truncate">{ride.pickup} → {ride.destination}</div>
+                          </td>
+                          <td className="px-6 py-4 whitespace-nowrap text-sm text-stone-600">
+                            {ride.passengerId?.name || 'User'}
+                          </td>
+                          <td className="px-6 py-4 whitespace-nowrap text-sm font-bold text-green-600">
+                            ₹{ride.fare}
+                          </td>
+                          <td className="px-6 py-4 whitespace-nowrap">
+                            <span className={`px-3 py-1 inline-flex text-xs leading-5 font-bold rounded-full border ${statusColors[ride.rideStatus]}`}>
+                              {ride.rideStatus}
+                            </span>
+                          </td>
+                        </tr>
+                      ));
+                    })()}
+                  </tbody>
+                </table>
+              </div>
+              {/* Pagination */}
+              {(() => {
+                const total = recentRides.filter(r => r.createdAt?.substring(0,10) === selectedHistoryDate).length;
+                const totalPages = Math.ceil(total / 10);
+                if (totalPages <= 1) return null;
+                return (
+                  <div className="p-4 border-t border-stone-100 bg-white flex justify-between items-center">
+                    <button disabled={currentPage === 1} onClick={() => setCurrentPage(p => p - 1)}
+                      className="px-4 py-2 text-sm font-bold border border-stone-200 rounded-lg hover:bg-stone-50 disabled:opacity-50 disabled:cursor-not-allowed">
+                      ← Previous
+                    </button>
+                    <span className="text-sm font-bold text-stone-600">Page {currentPage} of {totalPages}</span>
+                    <button disabled={currentPage === totalPages} onClick={() => setCurrentPage(p => p + 1)}
+                      className="px-4 py-2 text-sm font-bold border border-stone-200 rounded-lg hover:bg-stone-50 disabled:opacity-50 disabled:cursor-not-allowed">
+                      Next →
+                    </button>
+                  </div>
+                );
+              })()}
             </div>
           </div>
         )}

@@ -1,5 +1,5 @@
 import express from 'express';
-import { createRide, getRides, getRideById, cancelRide, startRide, completeRide, acceptRide, declineRide } from '../controllers/rideController.js';
+import { createRide, getRides, getRideById, cancelRide, startRide, completeRide, acceptRide, declineRide, rateRide } from '../controllers/rideController.js';
 import { protect, authorize } from '../middleware/authMiddleware.js';
 
 const router = express.Router();
@@ -25,5 +25,8 @@ router.route('/:id/start')
 
 router.route('/:id/complete')
   .put(protect, authorize('driver', 'admin'), completeRide);
+
+router.route('/:id/rate')
+  .post(protect, authorize('passenger'), rateRide);
 
 export default router;

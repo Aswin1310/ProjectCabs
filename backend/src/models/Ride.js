@@ -79,6 +79,15 @@ const rideSchema = new mongoose.Schema(
     scheduledFor: {
       type: Date,
     },
+    passengerRating: {
+      type: Number,
+      min: 1,
+      max: 5,
+    },
+    passengerFeedback: {
+      type: String,
+      default: '',
+    },
     declinedDrivers: [
       {
         type: mongoose.Schema.Types.ObjectId,

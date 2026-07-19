@@ -21,6 +21,10 @@ const PassengerProfile = () => {
   const [loadingRides, setLoadingRides] = useState(true);
   const [activeTab, setActiveTab] = useState('overview');
   const [selectedRide, setSelectedRide] = useState(null);
+  
+  const [selectedHistoryDate, setSelectedHistoryDate] = useState('');
+  const [currentPage, setCurrentPage] = useState(1);
+  const RIDES_PER_PAGE = 10;
 
   useEffect(() => {
     api.get('/passenger/profile')
@@ -254,24 +258,80 @@ const PassengerProfile = () => {
                   </button>
                 </div>
               ) : (
-                <div className="space-y-3">
-                  {rides.map(ride => (
-                    <button
-                      key={ride._id}
-                      onClick={() => setSelectedRide(ride)}
-                      className="w-full text-left bg-white rounded-2xl border border-stone-100 shadow-sm hover:shadow-md hover:border-[#EAB308]/40 transition-all p-5 flex items-center gap-4 group"
-                    >
-                      <div className="w-10 h-10 rounded-xl bg-stone-100 flex items-center justify-center text-lg flex-shrink-0 group-hover:bg-[#EAB308]/10 transition">🚕</div>
-                      <div className="flex-1 min-w-0">
-                        <p className="font-bold text-stone-800 text-sm truncate">{ride.pickup} → {ride.destination}</p>
-                        <p className="text-xs text-stone-400 mt-0.5">{ride.cabType} · {formatDate(ride.createdAt)}</p>
-                      </div>
-                      <div className="text-right flex-shrink-0">
-                        <p className="font-extrabold text-[#CA8A04]">₹{ride.fare}</p>
-                        <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${statusColors[ride.rideStatus]}`}>{ride.rideStatus}</span>
-                      </div>
-                    </button>
-                  ))}
+                <div className="space-y-5">
+                  {/* Date Picker Filter */}
+                  <div className="bg-[#0F0F10] rounded-2xl p-5 text-white flex flex-col sm:flex-row items-center gap-4 justify-between">
+                    <div>
+                      <h2 className="text-sm font-extrabold uppercase tracking-wider text-stone-400 mb-1">Filter by Date</h2>
+                      <p className="text-stone-500 text-xs">Select a date to view your trips</p>
+                    </div>
+                    <div className="flex gap-2 w-full sm:w-auto">
+                        <input
+                            type="date"
+                            value={selectedHistoryDate}
+                            onChange={e => { setSelectedHistoryDate(e.target.value); setCurrentPage(1); }}
+                            className="p-3 w-full rounded-xl bg-stone-800 border border-stone-700 font-bold text-white outline-none focus:ring-2 focus:ring-yellow-500 text-sm"
+                        />
+                        {selectedHistoryDate && (
+                            <button onClick={() => { setSelectedHistoryDate(''); setCurrentPage(1); }} className="px-4 py-3 bg-stone-800 text-white rounded-xl hover:bg-stone-700 font-bold text-sm">Clear</button>
+                        )}
+                    </div>
+                  </div>
+
+                  {(() => {
+                    const filtered = selectedHistoryDate 
+                        ? rides.filter(r => r.createdAt?.substring(0, 10) === selectedHistoryDate)
+                        : rides;
+                    
+                    const totalPages = Math.ceil(filtered.length / RIDES_PER_PAGE);
+                    const paginatedList = filtered.slice((currentPage - 1) * RIDES_PER_PAGE, currentPage * RIDES_PER_PAGE);
+
+                    return (
+                        <>
+                            <div className="text-sm font-bold text-stone-500 mb-2">{filtered.length} ride(s) found</div>
+                            <div className="space-y-3">
+                                {paginatedList.map(ride => (
+                                    <button
+                                    key={ride._id}
+                                    onClick={() => setSelectedRide(ride)}
+                                    className="w-full text-left bg-white rounded-2xl border border-stone-100 shadow-sm hover:shadow-md hover:border-[#EAB308]/40 transition-all p-5 flex flex-col sm:flex-row sm:items-center gap-4 group"
+                                    >
+                                    <div className="w-10 h-10 rounded-xl bg-stone-100 hidden sm:flex items-center justify-center text-lg flex-shrink-0 group-hover:bg-[#EAB308]/10 transition">🚕</div>
+                                    <div className="flex-1 min-w-0">
+                                        <p className="font-bold text-stone-800 text-sm truncate">{ride.pickup} → {ride.destination}</p>
+                                        <p className="text-xs text-stone-400 mt-0.5">{ride.cabType} · {formatDate(ride.createdAt)}</p>
+                                    </div>
+                                    <div className="text-right sm:text-right flex-shrink-0">
+                                        <p className="font-extrabold text-[#CA8A04]">₹{ride.fare}</p>
+                                        <span className={`text-[10px] inline-block font-bold mt-1 px-2 py-0.5 rounded-full border ${statusColors[ride.rideStatus]}`}>{ride.rideStatus}</span>
+                                    </div>
+                                    </button>
+                                ))}
+                            </div>
+                            
+                            {/* Pagination Controls */}
+                            {totalPages > 1 && (
+                                <div className="flex justify-between items-center bg-white p-4 rounded-2xl border border-stone-100 shadow-sm mt-4">
+                                    <button 
+                                        disabled={currentPage === 1}
+                                        onClick={() => setCurrentPage(p => p - 1)}
+                                        className="px-4 py-2 font-bold text-sm bg-stone-100 rounded-xl hover:bg-stone-200 disabled:opacity-50 disabled:cursor-not-allowed"
+                                    >
+                                        ← Prev
+                                    </button>
+                                    <span className="font-bold text-stone-500 text-sm">Page {currentPage} of {totalPages}</span>
+                                    <button 
+                                        disabled={currentPage === totalPages}
+                                        onClick={() => setCurrentPage(p => p + 1)}
+                                        className="px-4 py-2 font-bold text-sm bg-stone-100 rounded-xl hover:bg-stone-200 disabled:opacity-50 disabled:cursor-not-allowed"
+                                    >
+                                        Next →
+                                    </button>
+                                </div>
+                            )}
+                        </>
+                    )
+                  })()}
                 </div>
               )
             )}
