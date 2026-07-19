@@ -317,21 +317,21 @@ const DriverProfile = () => {
               </div>
               <div className="overflow-x-auto">
                 <table className="min-w-full divide-y divide-stone-100">
-                  <thead className="bg-white">
+                  <thead className="bg-stone-50">
                     <tr>
-                      {['Time', 'Route', 'Passenger', 'Fare', 'Status'].map(h => (
-                        <th key={h} className="px-6 py-4 text-left text-xs font-bold text-stone-500 uppercase tracking-wider">{h}</th>
+                      {['Ride ID', 'Route', 'Passenger', 'Time', 'Fare', 'Status'].map(h => (
+                        <th key={h} className="px-5 py-3 text-left text-xs font-bold text-stone-500 uppercase tracking-wider">{h}</th>
                       ))}
                     </tr>
                   </thead>
                   <tbody className="bg-white divide-y divide-stone-100">
                     {loading ? (
-                      <tr><td colSpan="5" className="px-6 py-10 text-center text-stone-400">Loading...</td></tr>
+                      <tr><td colSpan="6" className="px-5 py-10 text-center text-stone-400">Loading...</td></tr>
                     ) : (() => {
                       const filtered = recentRides.filter(r => r.createdAt?.substring(0,10) === selectedHistoryDate);
                       const paginated = filtered.slice((currentPage - 1) * 10, currentPage * 10);
                       if (filtered.length === 0) return (
-                        <tr><td colSpan="5" className="px-6 py-12 text-center text-stone-400">
+                        <tr><td colSpan="6" className="px-5 py-12 text-center text-stone-400">
                           <div className="text-3xl mb-2">📭</div>
                           <p className="font-semibold">No rides on this date.</p>
                           <p className="text-xs mt-1">Try a different date from the picker above.</p>
@@ -339,21 +339,25 @@ const DriverProfile = () => {
                       );
                       return paginated.map((ride, i) => (
                         <tr key={ride._id || i} className="hover:bg-stone-50 transition cursor-pointer" onClick={() => navigate(`/ride/${ride._id}`)}>
-                          <td className="px-6 py-4 whitespace-nowrap text-sm text-stone-500 font-medium">
+                          <td className="px-5 py-4 whitespace-nowrap text-sm font-bold text-stone-900 font-mono">
+                              {ride._id ? ride._id.toString().slice(-8).toUpperCase() : 'N/A'}
+                          </td>
+                          <td className="px-5 py-4 text-sm max-w-[180px]">
+                              <div className="font-bold text-stone-800 truncate">{ride.pickup}</div>
+                              <div className="text-xs text-stone-400 mt-1 truncate">to {ride.destination}</div>
+                          </td>
+                          <td className="px-5 py-4 whitespace-nowrap text-sm text-stone-600">
+                            <div className="font-bold text-stone-800">{ride.passengerId?.name || 'User'}</div>
+                          </td>
+                          <td className="px-5 py-4 whitespace-nowrap text-sm text-stone-500 font-medium">
                             {new Date(ride.createdAt).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })}
                           </td>
-                          <td className="px-6 py-4 text-sm max-w-[200px]">
-                            <div className="font-bold text-stone-800 truncate">{ride.pickup} → {ride.destination}</div>
-                          </td>
-                          <td className="px-6 py-4 whitespace-nowrap text-sm text-stone-600">
-                            {ride.passengerId?.name || 'User'}
-                          </td>
-                          <td className="px-6 py-4 whitespace-nowrap text-sm font-bold text-green-600">
+                          <td className="px-5 py-4 whitespace-nowrap text-sm font-extrabold text-[#CA8A04]">
                             ₹{ride.fare}
                           </td>
-                          <td className="px-6 py-4 whitespace-nowrap">
-                            <span className={`px-3 py-1 inline-flex text-xs leading-5 font-bold rounded-full border ${statusColors[ride.rideStatus]}`}>
-                              {ride.rideStatus}
+                          <td className="px-5 py-4 whitespace-nowrap">
+                            <span className={`px-2.5 py-1 inline-flex text-[10px] leading-4 font-bold rounded-full border ${statusColors[ride.rideStatus]}`}>
+                              {ride.rideStatus.toUpperCase()}
                             </span>
                           </td>
                         </tr>

@@ -289,24 +289,52 @@ const PassengerProfile = () => {
                     return (
                         <>
                             <div className="text-sm font-bold text-stone-500 mb-2">{filtered.length} ride(s) found</div>
-                            <div className="space-y-3">
-                                {paginatedList.map(ride => (
-                                    <button
-                                    key={ride._id}
-                                    onClick={() => setSelectedRide(ride)}
-                                    className="w-full text-left bg-white rounded-2xl border border-stone-100 shadow-sm hover:shadow-md hover:border-[#EAB308]/40 transition-all p-5 flex flex-col sm:flex-row sm:items-center gap-4 group"
-                                    >
-                                    <div className="w-10 h-10 rounded-xl bg-stone-100 hidden sm:flex items-center justify-center text-lg flex-shrink-0 group-hover:bg-[#EAB308]/10 transition">🚕</div>
-                                    <div className="flex-1 min-w-0">
-                                        <p className="font-bold text-stone-800 text-sm truncate">{ride.pickup} → {ride.destination}</p>
-                                        <p className="text-xs text-stone-400 mt-0.5">{ride.cabType} · {formatDate(ride.createdAt)}</p>
-                                    </div>
-                                    <div className="text-right sm:text-right flex-shrink-0">
-                                        <p className="font-extrabold text-[#CA8A04]">₹{ride.fare}</p>
-                                        <span className={`text-[10px] inline-block font-bold mt-1 px-2 py-0.5 rounded-full border ${statusColors[ride.rideStatus]}`}>{ride.rideStatus}</span>
-                                    </div>
-                                    </button>
-                                ))}
+                            {/* Ride Table formatted like Admin Ride Hub */}
+                            <div className="bg-white rounded-3xl shadow-sm border border-stone-100 overflow-hidden mt-4">
+                                <div className="overflow-x-auto">
+                                    <table className="min-w-full divide-y divide-stone-100">
+                                        <thead className="bg-stone-50">
+                                            <tr>
+                                                {['Ride ID', 'Route', 'Cab Info', 'Date', 'Fare', 'Status', 'View'].map(h => (
+                                                    <th key={h} className="px-5 py-3 text-left text-xs font-bold text-stone-500 uppercase tracking-wider">{h}</th>
+                                                ))}
+                                            </tr>
+                                        </thead>
+                                        <tbody className="bg-white divide-y divide-stone-100">
+                                            {paginatedList.map(ride => (
+                                                <tr key={ride._id} className="hover:bg-stone-50 transition cursor-pointer" onClick={() => setSelectedRide(ride)}>
+                                                    <td className="px-5 py-4 whitespace-nowrap text-sm font-bold text-stone-900 font-mono">
+                                                        {ride._id.toString().slice(-8).toUpperCase()}
+                                                    </td>
+                                                    <td className="px-5 py-4 text-sm max-w-[180px]">
+                                                        <div className="font-bold text-stone-800 truncate">{ride.pickup}</div>
+                                                        <div className="text-xs text-stone-400 mt-1 truncate">to {ride.destination}</div>
+                                                    </td>
+                                                    <td className="px-5 py-4 whitespace-nowrap text-sm">
+                                                        <span className="font-bold text-stone-700">{ride.cabType}</span>
+                                                    </td>
+                                                    <td className="px-5 py-4 whitespace-nowrap text-sm text-stone-500 font-medium">
+                                                        {formatDate(ride.createdAt)}
+                                                    </td>
+                                                    <td className="px-5 py-4 whitespace-nowrap text-sm font-extrabold text-[#CA8A04]">
+                                                        ₹{ride.fare}
+                                                    </td>
+                                                    <td className="px-5 py-4 whitespace-nowrap">
+                                                        <span className={`text-[10px] inline-flex font-bold px-2.5 py-1 rounded-full border ${statusColors[ride.rideStatus]}`}>{ride.rideStatus.toUpperCase()}</span>
+                                                    </td>
+                                                    <td className="px-5 py-4 whitespace-nowrap text-right">
+                                                        <button 
+                                                            className="text-[#EAB308] font-bold text-xs bg-yellow-50 px-3 py-1.5 rounded-lg border border-yellow-200 hover:bg-yellow-100 transition"
+                                                            onClick={(e) => { e.stopPropagation(); setSelectedRide(ride); }}
+                                                        >
+                                                            Details →
+                                                        </button>
+                                                    </td>
+                                                </tr>
+                                            ))}
+                                        </tbody>
+                                    </table>
+                                </div>
                             </div>
                             
                             {/* Pagination Controls */}
