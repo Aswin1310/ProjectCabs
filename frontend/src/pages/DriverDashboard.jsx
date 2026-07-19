@@ -20,6 +20,7 @@ const DriverDashboard = () => {
 
     const [radarActive, setRadarActive]   = useState(false); // only true after manual toggle click
     const [rides, setRides]               = useState([]);
+    const [selectedDate, setSelectedDate] = useState(new Date().toISOString().split('T')[0]);
 
     // Stats states
     const [stats, setStats] = useState({
@@ -203,7 +204,9 @@ const DriverDashboard = () => {
             },
             (err) => {
                 if (err.code === 1) { // PERMISSION_DENIED
-                    alert('GPS permission denied. Please reset it by clicking the tune icon next to the URL, then reload.');
+                    setMyLocationName('GPS Access Blocked 🚫');
+                } else {
+                    setMyLocationName('GPS Signal Lost 📶');
                 }
                 console.warn('Geo error:', err.message);
             },
@@ -337,14 +340,55 @@ const DriverDashboard = () => {
                                 <h3 className="text-lg font-bold">📍 Current Active Location</h3>
                                 <p className="text-gray-500 text-sm">This is where passengers see you right now.</p>
                             </div>
-                            {myLocationName && (
-                                <div className="bg-green-50 px-4 py-2 rounded-xl border border-green-100 flex items-center gap-2">
-                                    <span className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></span>
-                                    <span className="text-green-700 font-bold text-sm whitespace-nowrap">{myLocationName}</span>
-                                </div>
-                            )}
+                            <div className="bg-green-50 px-4 py-2 rounded-xl border border-green-100 flex items-center gap-2 max-w-sm ml-auto">
+                                <span className="w-2 h-2 bg-green-500 rounded-full animate-pulse flex-shrink-0"></span>
+                                <span className="text-green-700 font-bold text-sm truncate">
+                                    {myLocationName ? myLocationName : myLocation ? `Locating... (${myLocation.lat.toFixed(4)}, ${myLocation.lng.toFixed(4)})` : 'Fetching GPS...'}
+                                </span>
+                            </div>
                         </div>
                     )}
+
+                    {/* ── Past Rides & Details ── */}
+                    <div className="bg-white rounded-2xl p-6 shadow-sm border border-gray-100">
+                        <div className="flex justify-between items-center mb-6">
+                            <div>
+                                <h3 className="text-xl font-bold">Past Rides</h3>
+                                <p className="text-sm text-gray-500">View your ride history by date</p>
+                            </div>
+                            <input 
+                                type="date" 
+                                value={selectedDate} 
+                                onChange={(e) => setSelectedDate(e.target.value)} 
+                                className="p-2 border border-gray-200 rounded-xl bg-gray-50 font-bold outline-none focus:ring-2 focus:ring-gray-300"
+                            />
+                        </div>
+                        <div className="space-y-4 max-h-96 overflow-y-auto pr-2">
+                            {(() => {
+                                const filtered = rides.filter(r => r.createdAt.startsWith(selectedDate));
+                                if (filtered.length === 0) return <p className="text-center text-gray-400 py-6">No rides found for this date.</p>;
+                                return filtered.map(ride => (
+                                    <div key={ride._id} className="p-4 border border-gray-100 rounded-xl bg-gray-50 flex flex-col md:flex-row justify-between gap-4">
+                                        <div className="flex-1 space-y-2">
+                                            <div className="flex items-center gap-2 text-sm text-gray-500">
+                                                <span className="font-bold">{new Date(ride.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+                                                <span>·</span>
+                                                <span className={`px-2 py-0.5 rounded font-bold text-xs ${ride.rideStatus === 'completed' ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
+                                                    {ride.rideStatus.toUpperCase()}
+                                                </span>
+                                            </div>
+                                            <p className="font-semibold text-gray-800 text-sm truncate max-w-[250px]"><span className="text-blue-500 mr-2">🟢</span>{ride.pickup}</p>
+                                            <p className="font-semibold text-gray-800 text-sm truncate max-w-[250px]"><span className="text-green-500 mr-2">📍</span>{ride.destination}</p>
+                                        </div>
+                                        <div className="text-right flex flex-col justify-center">
+                                            <p className="text-2xl font-black text-green-600">${ride.fare}</p>
+                                            <p className="text-xs font-bold text-gray-400">Distance: {ride.distance} km</p>
+                                        </div>
+                                    </div>
+                                ));
+                            })()}
+                        </div>
+                    </div>
                 </div>
             </div>
 

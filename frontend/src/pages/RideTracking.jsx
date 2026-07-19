@@ -47,6 +47,30 @@ const RideTracking = () => {
     /* Toast */
     const [toast, setToast]           = useState(null);
 
+    /* Cancellation Modal */
+    const [cancelModalOpen, setCancelModalOpen] = useState(false);
+    const [cancelReason, setCancelReason] = useState('Changed my mind');
+    const cancelReasons = ['Changed my mind', 'Driver asked me to cancel', 'Driver is too far', 'Booked by mistake', 'Other'];
+
+    /* Live ETA Timer */
+    useEffect(() => {
+        if (!etaMinutes || etaMinutes <= 0) return;
+        const timer = setInterval(() => {
+            setEtaMinutes(prev => (prev > 0 ? prev - 1 : 0));
+        }, 60000);
+        return () => clearInterval(timer);
+    }, [etaMinutes]);
+
+    /* Auto-navigate away if completed / cancelled */
+    useEffect(() => {
+        if (ride && (ride.rideStatus === 'completed' || ride.rideStatus === 'cancelled')) {
+            const timer = setTimeout(() => {
+                navigate(`/${user.role}-dashboard`, { replace: true });
+            }, 3500);
+            return () => clearTimeout(timer);
+        }
+    }, [ride?.rideStatus, navigate, user.role]);
+
     const isDriver = user.role === 'driver';
 
     /* ── Show toast ─────────────────────────────────────── */
@@ -216,9 +240,9 @@ const RideTracking = () => {
     }, [id, user.token]);
 
     /* ── REST action handler ─────────────────────────────── */
-    const handleAction = async (action) => {
+    const handleAction = async (action, reason = '') => {
         try {
-            const reqData = action === 'start' ? { otp: driverOTPInput } : {};
+            const reqData = action === 'cancel' ? { reason } : action === 'start' ? { otp: driverOTPInput } : {};
             await api.put(`/rides/${id}/${action}`, reqData);
             setRide(prev => ({ ...prev, rideStatus: action === 'cancel' ? 'cancelled' : action === 'start' ? 'started' : 'completed' }));
 
@@ -405,13 +429,32 @@ const RideTracking = () => {
                             <button onClick={handleResendOTP} className="text-blue-500 font-bold hover:underline text-sm inline-block">
                                 Resend OTP
                             </button>
-                            <button onClick={() => handleAction('cancel')} className="text-red-500 font-bold hover:underline text-sm inline-block">
+                            <button onClick={() => setCancelModalOpen(true)} className="text-red-500 font-bold hover:underline text-sm inline-block">
                                 Cancel Ride
                             </button>
                         </div>
                     </div>
                 )}
             </div>
+
+            {/* Cancellation Modal */}
+            {cancelModalOpen && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+                    <div className="bg-white rounded-2xl p-6 max-w-sm w-full shadow-2xl animate-fade-in-up">
+                        <h3 className="text-xl font-bold mb-4">Cancel Ride?</h3>
+                        <p className="text-sm text-gray-500 mb-4">Please let us know why you are cancelling.</p>
+                        <select className="w-full border border-gray-300 rounded-lg p-3 mb-6 focus:ring-2 focus:ring-red-500 outline-none" value={cancelReason} onChange={(e) => setCancelReason(e.target.value)}>
+                            {cancelReasons.map(r => (
+                                <option key={r} value={r}>{r}</option>
+                            ))}
+                        </select>
+                        <div className="flex gap-3">
+                            <button onClick={() => setCancelModalOpen(false)} className="flex-1 bg-gray-200 text-gray-800 font-bold py-3 rounded-xl hover:bg-gray-300 transition">Keep Ride</button>
+                            <button onClick={() => { setCancelModalOpen(false); handleAction('cancel', cancelReason); }} className="flex-1 bg-red-500 text-white font-bold py-3 rounded-xl hover:bg-red-600 transition shadow-lg">Confirm Cancel</button>
+                        </div>
+                    </div>
+                </div>
+            )}
 
             {/* ════════════════════════════════════════════
                 RIGHT PANEL – Live OpenStreetMap
@@ -421,16 +464,21 @@ const RideTracking = () => {
                     height="100%"
                     zoom={14}
                     center={
-                        ride?.pickupCoordinates
-                            ? [ride.pickupCoordinates[1], ride.pickupCoordinates[0]]
-                            : [11.0168, 76.9558]
+                        (isDriver ? myPos : driverPos)
+                            ? [(isDriver ? myPos : driverPos).lat, (isDriver ? myPos : driverPos).lng]
+                            : ride?.pickupCoordinates?.coordinates
+                                ? [ride.pickupCoordinates.coordinates[1], ride.pickupCoordinates.coordinates[0]]
+                                : [11.0168, 76.9558]
                     }
-                    driverPos={driverPos}
-                    myPos={myPos}
-                    pickupPos={ride?.pickupCoordinates || null}
-                    destPos={ride?.destinationCoordinates || null}
+                    driverPos={isDriver ? myPos : driverPos}
+                    myPos={isDriver ? null : myPos}
+                    pickupPos={ride?.pickupCoordinates?.coordinates || null}
+                    destPos={ride?.destinationCoordinates?.coordinates || null}
                     pickupLabel={ride?.pickup || 'Pickup'}
                     destLabel={ride?.destination || 'Destination'}
+                    ridePhase={ride?.rideStatus}
+                    trackDriver={true}
+                    showRoute={!isDriver && ride?.rideStatus !== 'accepted'}
                 />
 
                 {/* Live GPS badge */}
@@ -449,7 +497,7 @@ const RideTracking = () => {
                 {/* ── CHAT BUTTON ── */}
                 <button
                     onClick={openChat}
-                    className="absolute bottom-6 right-6 bg-gray-900 text-white w-14 h-14 rounded-full flex items-center justify-center shadow-2xl hover:bg-gray-700 transition relative"
+                    className="absolute bottom-6 right-6 bg-gray-900 text-white w-14 h-14 rounded-full flex items-center justify-center shadow-2xl hover:bg-gray-700 transition z-50"
                     aria-label="Open Chat"
                 >
                     <span className="text-2xl">💬</span>

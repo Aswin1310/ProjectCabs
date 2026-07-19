@@ -60,6 +60,21 @@ const MapClickHandler = ({ onMapClick }) => {
     return null;
 };
 
+/* ── Auto-pan smoothly when tracking driver ─────────────── */
+const DriverTracker = ({ position }) => {
+    const map  = useMap();
+    const prev = useRef(null);
+    useEffect(() => {
+        if (!isValidLatLng(position)) return;
+        const key = `${position[0].toFixed(5)},${position[1].toFixed(5)}`;
+        if (key !== prev.current) {
+            map.panTo(position, { animate: true, duration: 0.8 });
+            prev.current = key;
+        }
+    }, [position, map]);
+    return null;
+};
+
 /* ── Auto-pan smoothly when primary position changes ─────────── */
 const SmartPan = ({ position }) => {
     const map  = useMap();
@@ -127,14 +142,16 @@ const fetchOSRMRoute = async (from, to) => {
  * ─────
  * center      [lat, lng]           – initial / fallback center
  * zoom        number               – initial zoom (default 13)
- * driverPos   { lat, lng } | null  – live driver marker (blue)
+ * driverPos   { lat, lng } | null  – live driver marker (blue car icon)
  * myPos       { lat, lng } | null  – passenger / self marker (red)
  * pickupPos   [lng, lat]  | null   – pickup marker (green)  GeoJSON order
  * destPos     [lng, lat]  | null   – dest marker (orange)   GeoJSON order
  * pickupLabel string
  * destLabel   string
  * height      string               – css height (default "100%")
- * showRoute   bool                 – draw OSRM route
+ * showRoute   bool                 – draw OSRM pickup→dest route
+ * ridePhase   string               – 'accepted' | 'started' — controls driver route target
+ * trackDriver bool                 – continuously pan to driver position
  * onRouteInfo fn({ distanceM, durationS })
  * onMapClick  fn([lng, lat])       – called on map click for interactive selection
  */
@@ -149,6 +166,8 @@ const LeafletMap = ({
     destLabel   = 'Destination',
     height      = '100%',
     showRoute   = true,
+    ridePhase   = null,
+    trackDriver = false,
     onRouteInfo = null,
     onMapClick  = null,
 }) => {
@@ -179,17 +198,22 @@ const LeafletMap = ({
         showRoute
     ]);
 
-    /* ── OSRM: driver → pickup (approach route) ──────────────── */
+    /* ── OSRM: driver live route (phase-aware) ──────────────── */
     useEffect(() => {
-        if (!driverLL || !pickupLL) { setDriverRoute(null); return; }
+        if (!driverLL) { setDriverRoute(null); return; }
+        // During 'started' route driver → destination so driver sees drop-off path
+        const routeTarget = (ridePhase === 'started' && destLL) ? destLL : pickupLL;
+        if (!routeTarget) { setDriverRoute(null); return; }
         let cancelled = false;
-        fetchOSRMRoute([driverLL[1], driverLL[0]], [pickupLL[1], pickupLL[0]]).then(result => {
+        fetchOSRMRoute([driverLL[1], driverLL[0]], [routeTarget[1], routeTarget[0]]).then(result => {
             if (!cancelled) setDriverRoute(result);
         });
         return () => { cancelled = true; };
     }, [
         driverLL ? `${driverLL[0].toFixed(4)},${driverLL[1].toFixed(4)}` : null,
         pickupLL ? pickupLL.join(',') : null,
+        destLL   ? destLL.join(',')   : null,
+        ridePhase,
     ]);
 
     /* ── Bounds & pan helpers ─────────────────────────────────── */
@@ -211,6 +235,7 @@ const LeafletMap = ({
 
             {boundsPoints.length >= 2 && <FitBounds points={boundsPoints} />}
             {boundsPoints.length === 1 && isValidLatLng(panTarget) && <SmartPan position={panTarget} />}
+            {trackDriver && driverLL && <DriverTracker position={driverLL} />}
 
             {/* Main route: pickup → destination (green solid) */}
             {mainRoute?.coords?.length > 1 && (
@@ -220,11 +245,13 @@ const LeafletMap = ({
                 />
             )}
 
-            {/* Driver approach route (blue dashed) */}
+            {/* Driver route — blue dashed = approaching pickup, yellow solid = in-trip to drop-off */}
             {driverRoute?.coords?.length > 1 && (
                 <Polyline
                     positions={driverRoute.coords}
-                    pathOptions={{ color: '#3b82f6', weight: 4, opacity: 0.75, dashArray: '8 6' }}
+                    pathOptions={ridePhase === 'started'
+                        ? { color: '#f59e0b', weight: 5, opacity: 0.9 }
+                        : { color: '#3b82f6', weight: 4, opacity: 0.75, dashArray: '8 6' }}
                 />
             )}
 

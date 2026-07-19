@@ -13,6 +13,7 @@ const DriverProfile = () => {
   const [recentRides, setRecentRides] = useState([]);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState('overview');
+  const [currentPage, setCurrentPage] = useState(1);
 
   useEffect(() => {
     const fetchAll = async () => {
@@ -286,7 +287,7 @@ const DriverProfile = () => {
                                 <tr>
                                     <td colSpan="5" className="px-6 py-10 text-center text-stone-400">Loading...</td>
                                 </tr>
-                            ) : recentRides.length > 0 ? recentRides.map((ride, i) => (
+                            ) : recentRides.length > 0 ? recentRides.slice((currentPage - 1) * 10, currentPage * 10).map((ride, i) => (
                                 <tr key={ride._id || i} className="hover:bg-stone-50 transition cursor-pointer" onClick={() => navigate(`/ride/${ride._id}`)}>
                                     <td className="px-6 py-4 whitespace-nowrap text-sm text-stone-600 font-medium">
                                         {formatDate(ride.createdAt)}
@@ -316,6 +317,28 @@ const DriverProfile = () => {
                         </tbody>
                     </table>
                 </div>
+
+                {recentRides.length > 10 && (
+                    <div className="p-4 border-t border-stone-100 bg-white flex justify-between items-center">
+                        <button 
+                            disabled={currentPage === 1}
+                            onClick={() => setCurrentPage(prev => prev - 1)}
+                            className="px-4 py-2 text-sm font-bold border border-stone-200 rounded-lg hover:bg-stone-50 disabled:opacity-50 disabled:cursor-not-allowed"
+                        >
+                            Previous
+                        </button>
+                        <span className="text-sm font-bold text-stone-600">
+                            Page {currentPage} of {Math.ceil(recentRides.length / 10)}
+                        </span>
+                        <button 
+                            disabled={currentPage === Math.ceil(recentRides.length / 10)}
+                            onClick={() => setCurrentPage(prev => prev + 1)}
+                            className="px-4 py-2 text-sm font-bold border border-stone-200 rounded-lg hover:bg-stone-50 disabled:opacity-50 disabled:cursor-not-allowed"
+                        >
+                            Next
+                        </button>
+                    </div>
+                )}
             </div>
           </div>
         )}

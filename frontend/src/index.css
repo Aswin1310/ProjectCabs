@@ -8,7 +8,11 @@
 }
 
 body {
-  @apply bg-background text-primary font-sans antialiased;
+  @apply bg-background text-primary font-sans antialiased transition-colors duration-300;
+}
+
+.dark body {
+  @apply bg-primary text-background;
 }
 
 .auth-form-container {

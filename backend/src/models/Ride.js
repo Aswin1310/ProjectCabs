@@ -73,6 +73,12 @@ const rideSchema = new mongoose.Schema(
       enum: ['pending', 'paid', 'failed'],
       default: 'pending',
     },
+    cancellationReason: {
+      type: String,
+    },
+    scheduledFor: {
+      type: Date,
+    },
     declinedDrivers: [
       {
         type: mongoose.Schema.Types.ObjectId,

@@ -8,12 +8,12 @@ import { cacheRideState, deleteCachedRide, verifyRideOTP, getRideOTPAttempts, in
 // @route   POST /api/rides
 // @access  Private (Passenger)
 export const createRide = async (req, res) => {
-  const { pickup, destination, pickupCoordinates, destinationCoordinates, distance, duration, fare, cabType, rideType } = req.body;
+  const { pickup, destination, pickupCoordinates, destinationCoordinates, distance, duration, fare, cabType, rideType, scheduledFor } = req.body;
 
   try {
-    // Find drivers who are currently busy with accepted or started rides
+    // Find drivers who are currently busy with pending, accepted, or started rides
     const busyRides = await Ride.find({
-      rideStatus: { $in: ['accepted', 'started'] },
+      rideStatus: { $in: ['pending', 'accepted', 'started'] },
       driverId: { $ne: null }
     }).select('driverId');
     const busyDriverIds = busyRides.map(r => r.driverId).filter(Boolean);
@@ -80,6 +80,7 @@ export const createRide = async (req, res) => {
       fare,
       cabType,
       rideType: rideType || 'daily',
+      scheduledFor: scheduledFor ? new Date(scheduledFor) : undefined,
       driverId: nearestDriver ? nearestDriver._id : null,
       rideStatus: 'pending',
     });
@@ -179,6 +180,7 @@ export const getRideById = async (req, res) => {
 // @route   PUT /api/rides/:id/cancel
 // @access  Private
 export const cancelRide = async (req, res) => {
+  const { reason } = req.body || {};
   try {
     const ride = await Ride.findById(req.params.id);
 
@@ -189,6 +191,7 @@ export const cancelRide = async (req, res) => {
     }
 
     ride.rideStatus = 'cancelled';
+    if (reason) ride.cancellationReason = reason;
     await ride.save();
 
     // Clear Redis cache
@@ -201,7 +204,7 @@ export const cancelRide = async (req, res) => {
         const driver = await Driver.findById(ride.driverId);
         if (driver) {
           const driverSocketId = activeDrivers.get(driver.userId.toString());
-          if (driverSocketId) io.to(driverSocketId).emit('rideCancelled', { rideId: ride._id, reason: 'Passenger cancelled.' });
+          if (driverSocketId) io.to(driverSocketId).emit('rideCancelled', { rideId: ride._id, reason: reason || 'Passenger cancelled.' });
         }
       }
       io.emit('adminRideUpdate', { event: 'ride_cancelled', rideId: ride._id });
@@ -382,7 +385,7 @@ export const declineRide = async (req, res) => {
 
     // Find the next closest driver who is online, not busy, and hasn't declined
     const busyRides = await Ride.find({
-      rideStatus: { $in: ['accepted', 'started'] },
+      rideStatus: { $in: ['pending', 'accepted', 'started'] },
       driverId: { $ne: null }
     }).select('driverId');
 

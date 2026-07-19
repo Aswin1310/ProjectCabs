@@ -1,9 +1,24 @@
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
+import { useState, useEffect } from 'react';
 
 const Navbar = () => {
   const { user, logout } = useAuth();
   const navigate = useNavigate();
+
+  const [darkMode, setDarkMode] = useState(
+    () => localStorage.getItem('theme') === 'dark' || (!('theme' in localStorage) && window.matchMedia('(prefers-color-scheme: dark)').matches)
+  );
+
+  useEffect(() => {
+    if (darkMode) {
+      document.documentElement.classList.add('dark');
+      localStorage.setItem('theme', 'dark');
+    } else {
+      document.documentElement.classList.remove('dark');
+      localStorage.setItem('theme', 'light');
+    }
+  }, [darkMode]);
 
   const handleLogout = async () => {
     await logout();
@@ -36,6 +51,12 @@ const Navbar = () => {
                 <Link to={`/${user.role}-dashboard`} className="text-stone-300 hover:text-white text-sm font-bold transition hidden sm:block">
                   Dashboard
                 </Link>
+
+                {/* Theme Toggle */}
+                <button onClick={() => setDarkMode(!darkMode)} className="text-white focus:outline-none p-1 bg-stone-800 hover:bg-stone-700 rounded-lg transition" title="Toggle Dark Mode">
+                  {darkMode ? '☀️' : '🌙'}
+                </button>
+
                 {/* Profile Avatar Button */}
                 <Link
                   to={`/${user.role}-profile`}
