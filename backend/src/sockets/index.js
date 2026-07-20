@@ -44,12 +44,15 @@ const computeETA = (distanceKm) => Math.max(1, Math.round((distanceKm / 30) * 60
 
 export const configureSockets = (server) => {
     io = new Server(server, {
-        cors: {
-            origin: process.env.NODE_ENV === 'production' ? false : '*',
-            methods: ['GET', 'POST', 'PUT', 'DELETE'],
-        },
-        pingTimeout: 60000,
-    });
+    cors: {
+        origin: [
+            "http://localhost:5173",
+            "https://cabsbookingf.onrender.com"
+        ],
+        credentials: true,
+        methods: ["GET", "POST"]
+    }
+});
 
     /* ----------------------------------------------------------
        AUTH MIDDLEWARE

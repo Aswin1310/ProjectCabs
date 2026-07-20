@@ -98,12 +98,15 @@ export const createRide = async (req, res) => {
         const populatedRide = await Ride.findById(ride._id).populate('passengerId', 'name phone');
         const driverUserId = nearestDriver.userId.toString();
         const driverSocketId = activeDrivers.get(driverUserId);
+        console.log("Assigned Driver UserId:", driverUserId);
+        console.log("Active Drivers:", [...activeDrivers.keys()]);
+        console.log("Socket Id:", driverSocketId);
         if (driverSocketId) {
-          io.to(driverSocketId).emit('newRide', populatedRide);
-          console.log(`📨 Ride ${ride._id} dispatched directly → driver ${driverUserId}`);
+        console.log("Sending ride...");
+        io.to(driverSocketId).emit("newRide", populatedRide);
         } else {
-          console.log(`Driver ${driverUserId} assigned in DB but not socket-connected yet.`);
-        }
+        console.log("Driver socket not found");
+        }      
       }
     } catch (socketErr) {
       console.error('Socket emit failed in createRide:', socketErr.message);
