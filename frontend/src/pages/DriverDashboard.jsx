@@ -4,7 +4,7 @@ import api from '../services/api';
 import { io } from 'socket.io-client';
 import { useNavigate } from 'react-router-dom';
 
-const SOCKET_URL = 'http://localhost:5000';
+const SOCKET_URL = import.meta.env.VITE_API_URL;
 
 const DriverDashboard = () => {
     const { user } = useAuth();

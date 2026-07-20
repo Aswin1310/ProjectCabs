@@ -190,10 +190,10 @@ const PassengerDashboard = () => {
              }
 
              const rideId = response.data._id;
-             const storedUser = JSON.parse(localStorage.getItem('user') || '{}');
-             const socket = io('http://localhost:5000', {
-                 auth: { token: user?.token || storedUser?.token }
-             });
+             const socket = io(import.meta.env.VITE_API_URL, {
+    auth: { token: user?.token || storedUser?.token },
+    withCredentials: true,
+});
 
              socket.on('connect', () => {
                  console.log('Passenger socket connected for ride:', rideId);

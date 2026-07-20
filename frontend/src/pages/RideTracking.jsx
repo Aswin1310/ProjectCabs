@@ -5,7 +5,7 @@ import { useAuth } from '../context/AuthContext';
 import { io } from 'socket.io-client';
 import LeafletMap from '../components/LeafletMap';
 
-const SOCKET_URL = 'http://localhost:5000';
+const SOCKET_URL = import.meta.env.VITE_API_URL;
 
 /* ─── Status colour mapping ─────────────────────────────── */
 const STATUS_CONFIG = {

@@ -74,10 +74,10 @@ const AdminDashboard = () => {
     useEffect(() => {
         fetchDashboardData();
 
-        const storedUser = JSON.parse(localStorage.getItem('user') || '{}');
-        const socket = io('http://localhost:5000', {
-            auth: { token: user?.token || storedUser?.token }
-        });
+        const socket = io(import.meta.env.VITE_API_URL, {
+    auth: { token: user?.token || storedUser?.token },
+    withCredentials: true
+});
 
         socket.on('connect', () => console.log('Admin socket connected'));
 
